@@ -522,7 +522,6 @@
           if (epoch !== this.audioEpoch) return;
           this.setState("playing", "正在播放回答");
           this.setHint("小睿說完後即可繼續提問。");
-          this.sendPlaybackEvidence("playback_started", generationId);
         }, Math.max(0, (startAt - context.currentTime) * 1000));
         this.playbackTimers.add(timer);
       }
@@ -563,7 +562,6 @@
       }
       if (!this.serverTurnComplete) return;
       if (this.hasAudioChunks && !this.finalAudioStreamReceived) return;
-      if (this.hasAudioChunks) this.sendPlaybackEvidence("playback_completed", this.activeGenerationId);
       this.finishTurn("回答完成，可以再說一次。");
     }
 
@@ -638,15 +636,6 @@
         void this.audioContext.close().catch(() => {});
         this.audioContext = null;
       }
-    }
-
-    sendPlaybackEvidence(evidenceType, generationId) {
-      if (!generationId) return;
-      this.send({
-        type: "client.playback.evidence",
-        evidence_type: evidenceType,
-        generation_id: generationId
-      });
     }
 
     send(payload) {
