@@ -69,6 +69,12 @@
   }
   </script>
   <script src="assets/js/site.js" defer></script>
+  <script src="assets/js/xiaorui-canonical/audio_format_resolver.js" defer></script>
+  <script src="assets/js/xiaorui-canonical/device_audio_environment.js" defer></script>
+  <script src="assets/js/xiaorui-canonical/recorder_adapter.js" defer></script>
+  <script src="assets/js/xiaorui-canonical/playback_adapter.js" defer></script>
+  <script src="assets/js/xiaorui-canonical/realtime_vertical_slice.js" defer></script>
+  <script src="assets/js/xiaorui-realtime.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">跳至主要內容</a>
@@ -171,16 +177,33 @@
       <img src="assets/images/xiaorui-assistant.png" alt="" width="1120" height="1405">
       <span class="xiaorui-launch-copy"><strong>小睿</strong><span>啟動對話</span></span>
     </button>
-    <section class="xiaorui-panel" id="xiaorui-panel" aria-label="小睿對話預覽" hidden data-xiaorui-panel>
+    <section class="xiaorui-panel" id="xiaorui-panel" aria-label="小睿語音對話" hidden data-xiaorui-panel>
       <header class="xiaorui-panel-header">
         <span><strong>小睿</strong><small>睿勤智慧服務助理</small></span>
         <button type="button" aria-label="關閉小睿對話" data-xiaorui-close>×</button>
       </header>
-      <div class="xiaorui-message">
-        <p>您好，我是小睿。您可以詢問公司登記、虛擬辦公室、會議空間或預約參觀。</p>
-        <small>M2a 預覽版｜Realtime 對話將於 M2b 接入</small>
+      <div class="xiaorui-conversation">
+        <div class="xiaorui-status" data-xiaorui-status-wrap data-state="offline" role="status" aria-live="polite">
+          <span class="xiaorui-status-dot" aria-hidden="true"></span>
+          <span data-xiaorui-status>尚未連線</span>
+        </div>
+        <div class="xiaorui-transcript" data-xiaorui-transcript aria-live="polite" aria-relevant="additions text">
+          <article class="xiaorui-bubble xiaorui-bubble-assistant">
+            <span>小睿</span>
+            <p>您好，我是小睿。您可以用語音詢問公司登記、虛擬辦公室、會議空間或預約參觀。</p>
+          </article>
+        </div>
+        <p class="xiaorui-hint" data-xiaorui-hint>按一下按鈕並允許麥克風後，小睿會自動聆聽。</p>
+        <div class="xiaorui-controls">
+          <button class="xiaorui-voice-button" type="button" data-xiaorui-voice>
+            <span class="xiaorui-mic-icon" aria-hidden="true"></span>
+            <span data-xiaorui-voice-label>開始語音對話</span>
+          </button>
+          <button class="xiaorui-retry" type="button" data-xiaorui-retry hidden>重新連線</button>
+        </div>
       </div>
-      <a class="button button-dark xiaorui-contact" href="https://page.line.me/richspace" target="_blank" rel="noopener">先用 LINE 聯絡</a>
+      <p class="xiaorui-privacy">啟動後會偵測語音並自動送出；關閉面板會釋放麥克風與連線。</p>
+      <audio data-xiaorui-welcome preload="auto" hidden></audio>
     </section>
   </aside>
 </body>
