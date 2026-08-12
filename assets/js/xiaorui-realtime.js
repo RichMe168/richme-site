@@ -2,6 +2,7 @@
   "use strict";
 
   const REALTIME_URL = "wss://xiaorui.skywingai.com/ws/realtime";
+  const BACKEND_ORIGIN = "https://xiaorui.skywingai.com";
   const PCM_SAMPLE_RATE = 24000;
   const HANDSHAKE_TIMEOUT_MS = 10000;
   const MAX_RECONNECT_ATTEMPTS = 2;
@@ -48,14 +49,22 @@
       this.queuedAudioCount = 0;
       this.activeSources = new Set();
       this.playbackTimers = new Set();
+      this.scheduledDrainTimer = null;
       this.nextPlaybackAt = 0;
       this.scheduledChunkKeys = new Set();
       this.playbackStarted = false;
       this.playbackFailed = false;
 
+      this.welcomeAudio = null;
+      this.welcomeExpected = false;
+      this.welcomeStarted = false;
+      this.welcomePlayed = false;
+      this.welcomeActive = false;
+      this.welcomeBarrier = Promise.resolve();
+      this.resolveWelcomeBarrier = null;
+
       this.turnActive = false;
       this.serverTurnComplete = false;
-      this.finalAudioStreamReceived = false;
       this.hasAudioChunks = false;
       this.activeGenerationId = "";
       this.replyText = "";
@@ -116,6 +125,7 @@
       this.audioChunks = [];
       this.releaseMicrophone();
       this.resetPlayback(true);
+      this.resetWelcomeSession();
       this.turnActive = false;
       this.sessionReady = false;
 
@@ -144,6 +154,7 @@
       this.intentionalClose = false;
       this.sessionReady = false;
       this.connectAttempts += 1;
+      this.resetWelcomeSession();
       this.setState("connecting", this.connectAttempts > 1 ? "正在重新連線" : "正在連線");
       this.setHint("正在建立安全語音連線…");
       this.retryButton.hidden = true;
@@ -224,10 +235,10 @@
           this.setHint("小睿正在理解您的問題…");
           break;
         case "server.asr.partial":
-          this.setUserText(event.text || metadata.text || "", true);
+          this.setProvisionalUserText(event.text || metadata.text || "");
           break;
         case "server.asr.final":
-          this.setUserText(event.text || "", false);
+          this.setFinalUserText(event.text ?? "");
           this.setState("processing", "正在思考");
           this.setHint("小睿正在準備回答…");
           break;
@@ -247,23 +258,27 @@
           break;
         case "server.tts.started":
         case "server.audio.stream.started":
+          if (this.isWelcomeEvent(event)) break;
           this.setState("processing", "正在準備語音");
           this.setHint("即將播放小睿的回答…");
+          break;
+        case "server.tts.done":
+        case "server.audio.segment.ready":
+          if (this.isWelcomeEvent(event)) this.handleWelcomeEvent(event);
           break;
         case "server.audio.chunk":
           this.queuePcmChunk(event, generationId);
           break;
         case "server.audio.stream.completed":
-          if (metadata.is_final_segment === true || event.is_final_segment === true) {
-            this.finalAudioStreamReceived = true;
-          }
           this.maybeFinishTurn();
           break;
         case "server.audio.output.ready":
-          this.maybeFinishTurn();
+          if (this.isWelcomeEvent(event)) this.handleWelcomeEvent(event);
+          else this.maybeFinishTurn();
           break;
         case "server.voice.turn.completed":
           this.serverTurnComplete = true;
+          if (this.welcomeExpected && !this.welcomeStarted) this.completeWelcome("not_emitted");
           this.maybeFinishTurn();
           break;
         case "server.asr.failed":
@@ -280,6 +295,10 @@
         case "server.audio.stream.failed":
         case "server.audio.output.failed":
         case "server.audio.output.unavailable":
+          if (this.isWelcomeEvent(event)) {
+            this.completeWelcome("failed");
+            break;
+          }
           this.handlePlaybackFailure();
           break;
         case "server.session.closed":
@@ -425,14 +444,14 @@
       this.resetPlayback(false);
       this.turnActive = true;
       this.serverTurnComplete = false;
-      this.finalAudioStreamReceived = false;
       this.hasAudioChunks = false;
       this.playbackFailed = false;
       this.activeGenerationId = "";
       this.replyText = "";
       this.userBubble = null;
       this.assistantBubble = null;
-      this.setUserText("語音辨識中…", true);
+      this.setProvisionalUserText("語音辨識中…");
+      if (!this.welcomePlayed) this.expectWelcome();
     }
 
     prepareGeneration(generationId) {
@@ -440,7 +459,6 @@
       this.activeGenerationId = generationId || this.activeGenerationId;
       this.replyText = "";
       this.serverTurnComplete = false;
-      this.finalAudioStreamReceived = false;
       this.hasAudioChunks = false;
       this.playbackFailed = false;
     }
@@ -477,9 +495,11 @@
       if (this.scheduledChunkKeys.has(chunkKey)) return;
       this.scheduledChunkKeys.add(chunkKey);
       this.hasAudioChunks = true;
+      if (this.welcomeExpected && !this.welcomeStarted) this.completeWelcome("not_emitted_before_formal_audio");
       this.queuedAudioCount += 1;
       const epoch = this.audioEpoch;
       this.audioQueue = this.audioQueue
+        .then(() => this.welcomeBarrier)
         .then(() => this.schedulePcmChunk(event, resolvedGenerationId, epoch))
         .catch(() => this.handlePlaybackFailure())
         .finally(() => {
@@ -554,25 +574,125 @@
       return this.audioContext;
     }
 
+    isWelcomeEvent(event) {
+      const metadata = event.metadata || {};
+      return metadata.source_kind === "welcome"
+        || metadata.welcome_playback === true
+        || metadata.welcome_audio === true
+        || event.source_kind === "welcome"
+        || event.welcome_playback === true
+        || event.welcome_audio === true;
+    }
+
+    expectWelcome() {
+      if (this.welcomePlayed || this.welcomeExpected || this.welcomeStarted) return;
+      this.welcomeExpected = true;
+      this.welcomeBarrier = new Promise((resolve) => {
+        this.resolveWelcomeBarrier = resolve;
+      });
+    }
+
+    handleWelcomeEvent(event) {
+      if (this.welcomePlayed || this.welcomeStarted) return;
+      const metadata = event.metadata || {};
+      const audioUrl = metadata.audio_url || event.audio_url || "";
+      if (!audioUrl) return;
+
+      let resolvedUrl;
+      try {
+        resolvedUrl = new URL(audioUrl, BACKEND_ORIGIN).href;
+        if (new URL(resolvedUrl).origin !== BACKEND_ORIGIN) throw new Error("UnexpectedAudioOrigin");
+      } catch (error) {
+        this.completeWelcome("invalid_audio_url");
+        return;
+      }
+
+      this.welcomeExpected = false;
+      this.welcomeStarted = true;
+      this.welcomeActive = true;
+      this.setState("playing", "正在播放歡迎語");
+      this.setHint("歡迎語播放後，小睿會接著回答。");
+
+      const audio = new Audio(resolvedUrl);
+      this.welcomeAudio = audio;
+      audio.preload = "auto";
+      audio.onended = () => this.completeWelcome("ended");
+      audio.onerror = () => this.completeWelcome("error");
+      const playResult = audio.play();
+      if (playResult && typeof playResult.catch === "function") {
+        playResult.catch(() => this.completeWelcome("play_rejected"));
+      }
+    }
+
+    completeWelcome(reason) {
+      if (this.welcomePlayed && !this.welcomeActive && !this.welcomeExpected) return;
+      const audio = this.welcomeAudio;
+      if (audio) {
+        audio.onended = null;
+        audio.onerror = null;
+        if (reason !== "ended") {
+          try { audio.pause(); } catch (error) { /* media element already stopped */ }
+        }
+      }
+      this.welcomeAudio = null;
+      this.welcomeExpected = false;
+      this.welcomeStarted = false;
+      this.welcomeActive = false;
+      this.welcomePlayed = true;
+      const resolve = this.resolveWelcomeBarrier;
+      this.resolveWelcomeBarrier = null;
+      if (resolve) resolve();
+      this.maybeFinishTurn();
+    }
+
+    resetWelcomeSession() {
+      const audio = this.welcomeAudio;
+      if (audio) {
+        audio.onended = null;
+        audio.onerror = null;
+        try { audio.pause(); } catch (error) { /* media element already stopped */ }
+      }
+      const resolve = this.resolveWelcomeBarrier;
+      this.welcomeAudio = null;
+      this.welcomeExpected = false;
+      this.welcomeStarted = false;
+      this.welcomePlayed = false;
+      this.welcomeActive = false;
+      this.resolveWelcomeBarrier = null;
+      this.welcomeBarrier = Promise.resolve();
+      if (resolve) resolve();
+    }
+
     maybeFinishTurn() {
-      if (!this.turnActive || this.queuedAudioCount > 0 || this.activeSources.size > 0) return;
+      if (!this.turnActive || this.welcomeActive || this.queuedAudioCount > 0 || this.activeSources.size > 0) return;
       if (this.playbackFailed) {
         this.finishTurn("文字回覆已完成，但語音播放暫時無法使用。");
         return;
       }
       if (!this.serverTurnComplete) return;
-      if (this.hasAudioChunks && !this.finalAudioStreamReceived) return;
+      if (this.audioContext && this.nextPlaybackAt > this.audioContext.currentTime + 0.001) {
+        if (!this.scheduledDrainTimer) {
+          const delay = Math.max(0, (this.nextPlaybackAt - this.audioContext.currentTime) * 1000) + 20;
+          this.scheduledDrainTimer = window.setTimeout(() => {
+            this.scheduledDrainTimer = null;
+            this.maybeFinishTurn();
+          }, delay);
+        }
+        return;
+      }
       this.finishTurn("回答完成，可以再說一次。");
     }
 
     finishTurn(message) {
       this.turnActive = false;
       this.serverTurnComplete = false;
-      this.finalAudioStreamReceived = false;
       this.hasAudioChunks = false;
       this.activeGenerationId = "";
       this.nextPlaybackAt = 0;
       this.scheduledChunkKeys.clear();
+      this.playbackStarted = false;
+      if (this.scheduledDrainTimer) window.clearTimeout(this.scheduledDrainTimer);
+      this.scheduledDrainTimer = null;
       this.userBubble = null;
       this.assistantBubble = null;
       if (this.sessionReady) {
@@ -627,6 +747,8 @@
       this.activeSources.clear();
       this.playbackTimers.forEach((timer) => window.clearTimeout(timer));
       this.playbackTimers.clear();
+      if (this.scheduledDrainTimer) window.clearTimeout(this.scheduledDrainTimer);
+      this.scheduledDrainTimer = null;
       this.audioQueue = Promise.resolve();
       this.queuedAudioCount = 0;
       this.nextPlaybackAt = 0;
@@ -648,12 +770,22 @@
       }
     }
 
-    setUserText(text, partial) {
+    setProvisionalUserText(text) {
       if (!text) return;
+      this.setUserText(text, true, false);
+    }
+
+    setFinalUserText(text) {
+      this.setUserText(String(text ?? ""), false, true);
+    }
+
+    setUserText(text, partial, authoritative) {
+      if (!text && !authoritative) return;
       if (!this.userBubble) this.userBubble = this.createBubble("您", "user");
       const paragraph = this.userBubble.querySelector("p");
-      paragraph.textContent = text;
+      paragraph.textContent = text || "未辨識到語音";
       this.userBubble.dataset.partial = String(Boolean(partial));
+      this.userBubble.dataset.final = String(Boolean(authoritative));
       this.scrollTranscript();
     }
 
