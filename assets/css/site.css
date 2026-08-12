@@ -296,12 +296,15 @@ details p { margin: .75rem 0 0; color: var(--muted); }
   position: absolute;
   right: 0;
   bottom: 5.25rem;
-  width: min(360px, calc(100vw - 2rem));
+  display: flex;
+  width: min(400px, calc(100vw - 2rem));
+  max-height: min(650px, calc(100vh - 7.5rem));
   overflow: hidden;
   border: 1px solid rgba(20,40,65,.16);
   border-radius: 22px;
   background: var(--paper);
   box-shadow: 0 24px 70px rgba(7,17,31,.26);
+  flex-direction: column;
 }
 .xiaorui-panel[hidden] { display: none; }
 .xiaorui-panel-header {
@@ -325,10 +328,102 @@ details p { margin: .75rem 0 0; color: var(--muted); }
   font-size: 1.4rem;
   cursor: pointer;
 }
-.xiaorui-message { margin: 1rem; padding: 1rem; border-radius: 14px 14px 14px 4px; background: #eef3f8; }
-.xiaorui-message p { margin: 0; color: var(--navy-900); }
-.xiaorui-message small { display: block; margin-top: .7rem; color: var(--muted); }
-.xiaorui-contact { margin: 0 1rem 1rem; width: calc(100% - 2rem); }
+.xiaorui-conversation {
+  display: flex;
+  min-height: 0;
+  padding: 1rem;
+  flex: 1;
+  flex-direction: column;
+}
+.xiaorui-status {
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: .45rem;
+  min-height: 30px;
+  padding: .25rem .7rem;
+  border-radius: 999px;
+  color: #516071;
+  background: #edf1f5;
+  font-size: .78rem;
+  font-weight: 700;
+}
+.xiaorui-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #8290a0;
+}
+.xiaorui-status[data-state="connecting"] .xiaorui-status-dot,
+.xiaorui-status[data-state="processing"] .xiaorui-status-dot { background: var(--gold); animation: xiaorui-pulse 1.25s ease-in-out infinite; }
+.xiaorui-status[data-state="ready"] .xiaorui-status-dot { background: #2d9567; }
+.xiaorui-status[data-state="recording"] .xiaorui-status-dot { background: #c64242; animation: xiaorui-pulse .8s ease-in-out infinite; }
+.xiaorui-status[data-state="playing"] .xiaorui-status-dot { background: #397db6; animation: xiaorui-pulse 1s ease-in-out infinite; }
+.xiaorui-status[data-state="error"] .xiaorui-status-dot { background: #c64242; }
+.xiaorui-transcript {
+  display: flex;
+  min-height: 150px;
+  margin: .85rem -.15rem .25rem;
+  padding: 0 .15rem .25rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  flex: 1;
+  flex-direction: column;
+  gap: .7rem;
+  scrollbar-width: thin;
+}
+.xiaorui-bubble {
+  max-width: 88%;
+  padding: .72rem .85rem;
+  border-radius: 15px;
+}
+.xiaorui-bubble > span { display: block; margin-bottom: .2rem; color: #6f7b89; font-size: .7rem; font-weight: 700; }
+.xiaorui-bubble p { margin: 0; color: var(--navy-900); font-size: .9rem; line-height: 1.55; white-space: pre-wrap; }
+.xiaorui-bubble-assistant { align-self: flex-start; border-radius: 15px 15px 15px 4px; background: #eef3f8; }
+.xiaorui-bubble-user { align-self: flex-end; border-radius: 15px 15px 4px 15px; background: #eadfca; }
+.xiaorui-hint { min-height: 2.8em; margin: .5rem 0 .85rem; color: var(--muted); font-size: .78rem; line-height: 1.4; text-align: center; }
+.xiaorui-controls { display: grid; gap: .55rem; }
+.xiaorui-voice-button,
+.xiaorui-retry {
+  min-height: 50px;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.xiaorui-voice-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .6rem;
+  color: #fff;
+  background: var(--navy-900);
+}
+.xiaorui-voice-button[data-recording="true"] { background: #9f3434; }
+.xiaorui-voice-button:disabled { cursor: not-allowed; opacity: .5; }
+.xiaorui-retry { border: 1px solid var(--line); color: var(--navy-900); background: transparent; }
+.xiaorui-mic-icon {
+  position: relative;
+  display: inline-block;
+  width: 13px;
+  height: 18px;
+  border: 2px solid currentColor;
+  border-radius: 8px;
+}
+.xiaorui-mic-icon::before {
+  position: absolute;
+  top: 9px;
+  left: -5px;
+  width: 19px;
+  height: 9px;
+  border: 2px solid currentColor;
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
+  content: "";
+}
+.xiaorui-privacy { margin: 0; padding: .65rem 1rem; border-top: 1px solid var(--line); color: #7b8693; background: #f7f5f0; font-size: .7rem; text-align: center; }
+@keyframes xiaorui-pulse { 50% { opacity: .35; transform: scale(.8); } }
 :focus-visible { outline: 3px solid var(--gold-light); outline-offset: 3px; }
 
 @media (max-width: 900px) {
@@ -362,7 +457,9 @@ details p { margin: .75rem 0 0; color: var(--muted); }
   .xiaorui-widget { right: .75rem; bottom: .75rem; }
   .xiaorui-launcher { min-width: 152px; min-height: 56px; padding-left: 3.9rem; }
   .xiaorui-launcher > img { width: 68px; height: 86px; }
-  .xiaorui-panel { bottom: 4.75rem; }
+  .xiaorui-panel { bottom: 4.75rem; max-height: calc(100vh - 6.5rem); }
+  .xiaorui-conversation { padding: .85rem; }
+  .xiaorui-transcript { min-height: 120px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
