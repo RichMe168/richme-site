@@ -69,6 +69,11 @@
   }
   </script>
   <script src="assets/js/site.js" defer></script>
+  <script src="assets/js/xiaorui-canonical/audio_format_resolver.js" defer></script>
+  <script src="assets/js/xiaorui-canonical/device_audio_environment.js" defer></script>
+  <script src="assets/js/xiaorui-canonical/recorder_adapter.js" defer></script>
+  <script src="assets/js/xiaorui-canonical/playback_adapter.js" defer></script>
+  <script src="assets/js/xiaorui-canonical/realtime_vertical_slice.js" defer></script>
   <script src="assets/js/xiaorui-realtime.js" defer></script>
 </head>
 <body>
@@ -188,16 +193,17 @@
             <p>您好，我是小睿。您可以用語音詢問公司登記、虛擬辦公室、會議空間或預約參觀。</p>
           </article>
         </div>
-        <p class="xiaorui-hint" data-xiaorui-hint>連線完成後，按一下按鈕開始說話。</p>
+        <p class="xiaorui-hint" data-xiaorui-hint>按一下按鈕並允許麥克風後，小睿會自動聆聽。</p>
         <div class="xiaorui-controls">
-          <button class="xiaorui-voice-button" type="button" data-xiaorui-voice disabled>
+          <button class="xiaorui-voice-button" type="button" data-xiaorui-voice>
             <span class="xiaorui-mic-icon" aria-hidden="true"></span>
-            <span data-xiaorui-voice-label>請稍候</span>
+            <span data-xiaorui-voice-label>開始語音對話</span>
           </button>
           <button class="xiaorui-retry" type="button" data-xiaorui-retry hidden>重新連線</button>
         </div>
       </div>
-      <p class="xiaorui-privacy">語音僅在您按下停止後送出處理。</p>
+      <p class="xiaorui-privacy">啟動後會偵測語音並自動送出；關閉面板會釋放麥克風與連線。</p>
+      <audio data-xiaorui-welcome preload="auto" hidden></audio>
     </section>
   </aside>
 </body>
