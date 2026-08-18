@@ -346,11 +346,18 @@
       const conversation = diagnostics.conversation_state || "";
       const playback = diagnostics.playback_state || "";
       const gateOpen = diagnostics.input_gate === "open";
+      const microphoneFailureReason = String(diagnostics.microphone_failure_reason || "");
       if (diagnostics.error_type || diagnostics.lifecycle_state === "FAILED") {
-        const message = diagnostics.microphone_failure_reason === "microphone_api_unavailable"
+        const message = microphoneFailureReason === "microphone_api_unavailable"
           ? "瀏覽器不支援麥克風 API。"
           : "語音服務連線失敗，請重新連線。";
         this.setUiState("error", "語音服務連線失敗", message);
+        this.retryButton.hidden = false;
+        return;
+      }
+      if (microphoneFailureReason) {
+        const [label, hint] = this.microphoneFailureMessage(microphoneFailureReason);
+        this.setUiState("error", label, hint);
         this.retryButton.hidden = false;
         return;
       }
@@ -375,6 +382,19 @@
         return;
       }
       this.setUiState("connecting", "正在準備語音", "正在等待歡迎語音完成。");
+    }
+
+    microphoneFailureMessage(reason) {
+      const messages = {
+        microphone_permission_denied: ["麥克風權限遭拒", "請在瀏覽器網站設定允許麥克風後，按「重新連線」。"],
+        getUserMedia_rejected: ["無法啟用麥克風", "瀏覽器未能取得麥克風。請確認輸入裝置後重新連線。"],
+        audio_context_unavailable_for_microphone: ["無法啟用音訊", "瀏覽器無法建立語音所需的音訊環境，請重新連線。"],
+        web_audio_capture_failed: ["無法建立語音擷取", "麥克風已允許但音訊擷取未完成，請重新連線。"],
+        microphone_stream_not_live: ["找不到可用的麥克風", "請確認麥克風已連接且未被其他程式占用，然後重新連線。"],
+        microphone_not_ready_after_welcome: ["麥克風尚未完成初始化", "小睿已完成歡迎語音，但麥克風尚未就緒。請重新連線。"],
+        microphone_api_unavailable: ["瀏覽器不支援麥克風", "此瀏覽器沒有可用的麥克風 API。"]
+      };
+      return messages[reason] || ["麥克風初始化失敗", "語音輸入尚未就緒，請重新連線。"];
     }
 
     setUiState(state, label, hint) {

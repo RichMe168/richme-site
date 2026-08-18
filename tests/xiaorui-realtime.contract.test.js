@@ -320,6 +320,42 @@ const userBubble = widget.userBubbles.get("utterance-ui");
 assert.equal(userBubble.querySelector("p").textContent, "公司註冊");
 assert.equal(userBubble.dataset.final, "true");
 
+for (const reason of [
+  "microphone_permission_denied",
+  "getUserMedia_rejected",
+  "audio_context_unavailable_for_microphone",
+  "web_audio_capture_failed",
+  "microphone_stream_not_live",
+  "microphone_not_ready_after_welcome"
+]) {
+  widget.renderCanonicalState({
+    welcome_completed: true,
+    microphone_ready: false,
+    microphone_failure_reason: reason,
+    input_gate: "open",
+    listening_active: false,
+    conversation_state: "listening",
+    playback_state: "idle",
+    lifecycle_state: "ACTIVE"
+  }, [{ event: "session_identity_accepted", success: true, sequence: 1, runtime_streaming_provider: "xiaomi_streaming" }]);
+  assert.equal(selectors.get("[data-xiaorui-status-wrap]").dataset.state, "error", `${reason} must be visible even when canonical lifecycle remains ACTIVE`);
+  assert.notEqual(selectors.get("[data-xiaorui-status]").textContent, "正在準備語音", `${reason} must not remain in the preparing state`);
+  assert.equal(selectors.get("[data-xiaorui-retry]").hidden, false, `${reason} must retain reconnect control`);
+}
+
+widget.renderCanonicalState({
+  welcome_completed: true,
+  microphone_ready: true,
+  microphone_failure_reason: "",
+  input_gate: "open",
+  listening_active: true,
+  conversation_state: "listening",
+  playback_state: "idle",
+  lifecycle_state: "ACTIVE"
+}, [{ event: "session_identity_accepted", success: true, sequence: 1, runtime_streaming_provider: "xiaomi_streaming" }]);
+assert.equal(selectors.get("[data-xiaorui-status-wrap]").dataset.state, "ready", "completed welcome with a live microphone must become ready");
+assert.equal(selectors.get("[data-xiaorui-status]").textContent, "準備就緒");
+
 const missingSelectors = new Map(selectors);
 missingSelectors.delete("[data-xiaorui-voice]");
 missingSelectors.delete("[data-xiaorui-voice-label]");
