@@ -356,6 +356,79 @@ widget.renderCanonicalState({
 assert.equal(selectors.get("[data-xiaorui-status-wrap]").dataset.state, "ready", "completed welcome with a live microphone must become ready");
 assert.equal(selectors.get("[data-xiaorui-status]").textContent, "準備就緒");
 
+const disconnectSelectors = new Map();
+for (const selector of [
+  "[data-xiaorui-launch]", "[data-xiaorui-panel]", "[data-xiaorui-close]",
+  "[data-xiaorui-status-wrap]", "[data-xiaorui-status]", "[data-xiaorui-transcript]",
+  "[data-xiaorui-hint]", "[data-xiaorui-voice]", "[data-xiaorui-voice-label]",
+  "[data-xiaorui-retry]", "[data-xiaorui-welcome]"
+]) disconnectSelectors.set(selector, new MockElement());
+const disconnectedWidget = new adapter.RichMeRealtimeWidget({ querySelector: (selector) => disconnectSelectors.get(selector) || null });
+disconnectedWidget.authoritativeSessionReady = true;
+const disconnectLogs = [];
+const originalConsoleWarn = console.warn;
+console.warn = (...args) => disconnectLogs.push(args);
+const unexpectedDisconnect = {
+  websocket_connected: false,
+  websocket_close_initiator: "browser_or_backend",
+  websocket_close_code: "1006",
+  websocket_close_reason: "network_lost",
+  last_server_event_before_close: "server.session.created",
+  last_client_event_before_close: "client.session.start",
+  current_session_id: "session-preview-1",
+  conversation_state: "disconnected",
+  input_gate: "closed",
+  listening_active: false,
+  lifecycle_state: "ACTIVE"
+};
+disconnectedWidget.renderCanonicalState(unexpectedDisconnect, [{ event: "session_identity_accepted", success: true, sequence: 1, runtime_streaming_provider: "xiaomi_streaming" }]);
+console.warn = originalConsoleWarn;
+assert.equal(disconnectSelectors.get("[data-xiaorui-status-wrap]").dataset.state, "error", "disconnected authoritative session must be visible");
+assert.notEqual(disconnectSelectors.get("[data-xiaorui-status]").textContent, "正在準備語音", "disconnected session must not fall back to preparing");
+assert.equal(disconnectSelectors.get("[data-xiaorui-retry]").hidden, false, "disconnected session must retain reconnect control");
+assert.equal(disconnectLogs.length, 1, "unexpected disconnect must emit one concise console diagnostic");
+assert.deepEqual(disconnectLogs[0][1], {
+  websocket_close_initiator: "browser_or_backend",
+  websocket_close_code: "1006",
+  websocket_close_reason: "network_lost",
+  last_server_event_before_close: "server.session.created",
+  last_client_event_before_close: "client.session.start",
+  current_session_id: "session-preview-1",
+  conversation_state: "disconnected",
+  input_gate: "closed",
+  listening_active: false
+});
+
+widget.renderCanonicalState({
+  welcome_completed: true,
+  microphone_ready: true,
+  microphone_failure_reason: "",
+  input_gate: "open",
+  listening_active: true,
+  websocket_connected: true,
+  conversation_state: "listening",
+  playback_state: "idle",
+  lifecycle_state: "ACTIVE"
+}, [{ event: "session_identity_accepted", success: true, sequence: 1, runtime_streaming_provider: "xiaomi_streaming" }]);
+assert.equal(selectors.get("[data-xiaorui-status-wrap]").dataset.state, "ready", "session must reach ready before a later disconnect");
+widget.renderCanonicalState({
+  ...unexpectedDisconnect,
+  websocket_close_initiator: "backend_session_closed",
+  websocket_close_code: "server.session.closed",
+  websocket_close_reason: "server_session_closed"
+}, [{ event: "session_identity_accepted", success: true, sequence: 1, runtime_streaming_provider: "xiaomi_streaming" }]);
+assert.equal(selectors.get("[data-xiaorui-status-wrap]").dataset.state, "error", "ready session must transition to disconnected state after close");
+assert.notEqual(selectors.get("[data-xiaorui-status]").textContent, "正在準備語音", "ready session close must not return to preparing");
+assert.equal(selectors.get("[data-xiaorui-retry]").hidden, false, "ready session close must retain reconnect control");
+
+widget.started = false;
+widget.starting = false;
+widget.renderCanonicalState({
+  ...unexpectedDisconnect,
+  websocket_close_initiator: "user_stop"
+}, [{ event: "session_identity_accepted", success: true, sequence: 1, runtime_streaming_provider: "xiaomi_streaming" }]);
+assert.equal(selectors.get("[data-xiaorui-status]").textContent, "可以開始語音對話", "intentional stop must return to the available state without a disconnect error");
+
 const missingSelectors = new Map(selectors);
 missingSelectors.delete("[data-xiaorui-voice]");
 missingSelectors.delete("[data-xiaorui-voice-label]");

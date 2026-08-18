@@ -69,6 +69,7 @@
       this.app = null;
       this.started = false;
       this.starting = false;
+      this.intentionalStop = false;
       this.eventsBound = false;
       this.initializationFailure = "";
       this.authoritativeSessionReady = false;
@@ -78,6 +79,7 @@
       this.activeGenerationId = "";
       this.generationDisplayOffset = 0;
       this.lastDisplayText = "";
+      this.lastDisconnectDiagnosticKey = "";
 
       this.initialize();
     }
@@ -275,17 +277,22 @@
     }
 
     stopConversation() {
-      if (this.app) {
-        if (this.app.playback && typeof this.app.playback.clearForLifecycle === "function") this.app.playback.clearForLifecycle("richme_widget_closed", "richme_ui");
-        this.app.stop();
+      this.intentionalStop = true;
+      try {
+        if (this.app) {
+          if (this.app.playback && typeof this.app.playback.clearForLifecycle === "function") this.app.playback.clearForLifecycle("richme_widget_closed", "richme_ui");
+          this.app.stop();
+        }
+        if (this.welcomeAudio && typeof this.welcomeAudio.pause === "function") this.welcomeAudio.pause();
+      } finally {
+        this.started = false;
+        this.starting = false;
+        this.authoritativeSessionReady = false;
+        this.intentionalStop = false;
+        if (this.retryButton) this.retryButton.hidden = true;
+        this.refreshReadiness();
+        this.renderControls();
       }
-      if (this.welcomeAudio && typeof this.welcomeAudio.pause === "function") this.welcomeAudio.pause();
-      this.started = false;
-      this.starting = false;
-      this.authoritativeSessionReady = false;
-      if (this.retryButton) this.retryButton.hidden = true;
-      this.refreshReadiness();
-      this.renderControls();
     }
 
     renderCanonicalState(diagnostics, trace) {
@@ -347,6 +354,18 @@
       const playback = diagnostics.playback_state || "";
       const gateOpen = diagnostics.input_gate === "open";
       const microphoneFailureReason = String(diagnostics.microphone_failure_reason || "");
+      if (diagnostics.websocket_connected === false && conversation === "disconnected") {
+        const initiator = String(diagnostics.websocket_close_initiator || "");
+        if (initiator === "user_stop" || this.intentionalStop) {
+          if (!this.started && !this.starting) this.refreshReadiness();
+          return;
+        }
+        this.logDisconnectDiagnostic(diagnostics);
+        const [label, hint] = this.disconnectMessage(initiator);
+        this.setUiState("error", label, hint);
+        this.retryButton.hidden = false;
+        return;
+      }
       if (diagnostics.error_type || diagnostics.lifecycle_state === "FAILED") {
         const message = microphoneFailureReason === "microphone_api_unavailable"
           ? "瀏覽器不支援麥克風 API。"
@@ -395,6 +414,29 @@
         microphone_api_unavailable: ["瀏覽器不支援麥克風", "此瀏覽器沒有可用的麥克風 API。"]
       };
       return messages[reason] || ["麥克風初始化失敗", "語音輸入尚未就緒，請重新連線。"];
+    }
+
+    disconnectMessage(initiator) {
+      if (initiator === "backend_session_closed") return ["語音工作階段已結束", "語音服務已正常關閉本次工作階段，請按「重新連線」。"];
+      return ["語音連線已中斷", "語音服務連線意外中斷，請按「重新連線」。"];
+    }
+
+    logDisconnectDiagnostic(diagnostics) {
+      const detail = {
+        websocket_close_initiator: String(diagnostics.websocket_close_initiator || "browser_or_backend"),
+        websocket_close_code: String(diagnostics.websocket_close_code || ""),
+        websocket_close_reason: String(diagnostics.websocket_close_reason || ""),
+        last_server_event_before_close: String(diagnostics.last_server_event_before_close || ""),
+        last_client_event_before_close: String(diagnostics.last_client_event_before_close || ""),
+        current_session_id: String(diagnostics.current_session_id || ""),
+        conversation_state: String(diagnostics.conversation_state || ""),
+        input_gate: String(diagnostics.input_gate || ""),
+        listening_active: Boolean(diagnostics.listening_active)
+      };
+      const key = JSON.stringify(detail);
+      if (key === this.lastDisconnectDiagnosticKey) return;
+      this.lastDisconnectDiagnosticKey = key;
+      if (root.console && typeof root.console.warn === "function") root.console.warn("XiaoRui realtime session disconnected", detail);
     }
 
     setUiState(state, label, hint) {
