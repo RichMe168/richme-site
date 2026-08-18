@@ -10,16 +10,17 @@ const repoRoot = path.join(__dirname, "..");
 const canonicalDir = path.join(repoRoot, "assets", "js", "xiaorui-canonical");
 
 const canonicalHashes = {
-  "audio_format_resolver.js": "51b12bd01c08009ef304631873dbd1cadbd8150b96cbf366b21bad2199a6caf9",
-  "device_audio_environment.js": "1dd4559ad42567a62549e9d3d0502549e2732ea1ef8a6a45e38aa3f947baaf13",
-  "playback_adapter.js": "57ec6a6deae57e9ed01d9058a347aaa2449858175d4dfd3a3b0b4e26cf576e31",
-  "realtime_vertical_slice.js": "abdf899eea9ebbab134541afca2249441d6e00df579f6fc470ea6bfb00159245",
-  "recorder_adapter.js": "bebd491e82c300bb5ee9e123b87f57192d5ddec7d1041fcc37931ca125b98117"
+  "audio_format_resolver.js": "47eb4423c44d830f151aa6ebbfef9a6315944f2bc4bdf43e1e5d1e1cd5e84fc2",
+  "device_audio_environment.js": "83d208f135441bf2b842c5a3e9123bf60fde5a5064fd6193fdad46c592cbe2b8",
+  "playback_adapter.js": "3d36a5a2d3827f47a2cf3e189b1e7803c630aae992befb3f91fd82171d4892f7",
+  "realtime_vertical_slice.js": "f8eb9beb1a6fa8ca35fab506ca1b0400542f836844b09486c7170f3dc7c9ff2d",
+  "recorder_adapter.js": "f9b096b84d8cf543d458abf5c828e79f35bebfb9c10abbbb50478f6e495e1cd0"
 };
 
 for (const [fileName, expectedHash] of Object.entries(canonicalHashes)) {
   const content = fs.readFileSync(path.join(canonicalDir, fileName));
-  assert.equal(crypto.createHash("sha256").update(content).digest("hex"), expectedHash, `${fileName} must remain byte-identical to B`);
+  const gitNormalizedContent = content.toString("utf8").replace(/\r\n/g, "\n");
+  assert.equal(crypto.createHash("sha256").update(gitNormalizedContent).digest("hex"), expectedHash, `${fileName} must remain byte-identical to B after Git line-ending normalization`);
 }
 const welcomeContent = fs.readFileSync(path.join(repoRoot, "static", "audio", "bingtang_session_welcome.mp3"));
 assert.equal(
@@ -266,6 +267,8 @@ const adapterDocument = {
 };
 global.document = adapterDocument;
 global.location = { hostname: "feature-branch.richme-site.pages.dev" };
+Object.defineProperty(global, "navigator", { configurable: true, value: { mediaDevices: { getUserMedia() { return Promise.resolve(liveStream()); } } } });
+global.MediaRecorder = class { static isTypeSupported() { return true; } };
 const adapter = require(path.join(repoRoot, "assets", "js", "xiaorui-realtime.js"));
 assert.equal(adapter.resolveRealtimeEndpoint({ hostname: "feature-branch.richme-site.pages.dev" }), adapter.PREVIEW_ENDPOINT);
 assert.equal(adapter.resolveRealtimeEndpoint({ hostname: "localhost" }), adapter.PREVIEW_ENDPOINT);
@@ -281,6 +284,9 @@ for (const selector of [
 ]) selectors.set(selector, new MockElement());
 const widgetRoot = { querySelector: (selector) => selectors.get(selector) || null };
 const widget = new adapter.RichMeRealtimeWidget(widgetRoot);
+widget.open();
+assert.notEqual(selectors.get("[data-xiaorui-status]").textContent, "準備就緒", "opening before session initialization must not claim ready");
+assert.equal(selectors.get("[data-xiaorui-voice]").disabled, false, "a supported browser must retain an operable voice control");
 widget.renderCanonicalState({
   asr_result: "final",
   localized_transcript: "公司註冊",
@@ -314,6 +320,28 @@ const userBubble = widget.userBubbles.get("utterance-ui");
 assert.equal(userBubble.querySelector("p").textContent, "公司註冊");
 assert.equal(userBubble.dataset.final, "true");
 
+const missingSelectors = new Map(selectors);
+missingSelectors.delete("[data-xiaorui-voice]");
+missingSelectors.delete("[data-xiaorui-voice-label]");
+const missingDomWidget = new adapter.RichMeRealtimeWidget({ querySelector: (selector) => missingSelectors.get(selector) || null });
+assert.equal(missingSelectors.get("[data-xiaorui-status-wrap]").dataset.state, "error", "missing controls must present a visible error state");
+assert.ok(missingSelectors.get("[data-xiaorui-panel]").children.some((child) => child.className === "xiaorui-controls"), "missing controls must mount a visible fallback control area");
+
+const unsupportedSelectors = new Map();
+for (const selector of [
+  "[data-xiaorui-launch]", "[data-xiaorui-panel]", "[data-xiaorui-close]",
+  "[data-xiaorui-status-wrap]", "[data-xiaorui-status]", "[data-xiaorui-transcript]",
+  "[data-xiaorui-hint]", "[data-xiaorui-voice]", "[data-xiaorui-voice-label]",
+  "[data-xiaorui-retry]", "[data-xiaorui-welcome]"
+]) unsupportedSelectors.set(selector, new MockElement());
+const supportedNavigator = global.navigator;
+Object.defineProperty(global, "navigator", { configurable: true, value: {} });
+const unsupportedWidget = new adapter.RichMeRealtimeWidget({ querySelector: (selector) => unsupportedSelectors.get(selector) || null });
+unsupportedWidget.open();
+assert.equal(unsupportedSelectors.get("[data-xiaorui-status-wrap]").dataset.state, "error", "unsupported voice APIs must not claim ready");
+assert.equal(unsupportedSelectors.get("[data-xiaorui-voice]").disabled, true, "unsupported voice APIs must retain a visible disabled control");
+Object.defineProperty(global, "navigator", { configurable: true, value: supportedNavigator });
+
 const headers = fs.readFileSync(path.join(repoRoot, "_headers"), "utf8");
 assert.match(headers, /Permissions-Policy: camera=\(\), geolocation=\(\), microphone=\(self\)/);
 assert.match(headers, /wss:\/\/beta-xiaorui\.skywingai\.com/);
@@ -324,6 +352,21 @@ assert.doesNotMatch(headers, /media-src[^\n]*\*/);
 const adapterSource = fs.readFileSync(path.join(repoRoot, "assets", "js", "xiaorui-realtime.js"), "utf8");
 assert.doesNotMatch(adapterSource, /new WebSocket\(/, "UI adapter must not own the WebSocket state machine");
 assert.doesNotMatch(adapterSource, /pcm16le|server\.voice\.turn\.completed|server\.audio\.chunk/, "UI adapter must not reimplement canonical PCM or terminal handling");
+
+const indexHtml = fs.readFileSync(path.join(repoRoot, "index.html"), "utf8");
+const siteCss = fs.readFileSync(path.join(repoRoot, "assets", "css", "site.css"), "utf8");
+assert.match(siteCss, /\.xiaorui-conversation\s*\{[^}]*overflow:\s*hidden[^}]*flex:\s*1 1 auto/s, "conversation layout must constrain scrolling content instead of clipping controls");
+assert.match(siteCss, /\.xiaorui-controls\s*\{\s*flex:\s*0 0 auto;/, "controls must not shrink out of the panel");
+const widgetAssetVersion = "xiaorui-controls-v1";
+for (const assetPath of [
+  "assets/css/site.css",
+  "assets/js/xiaorui-canonical/audio_format_resolver.js",
+  "assets/js/xiaorui-canonical/device_audio_environment.js",
+  "assets/js/xiaorui-canonical/recorder_adapter.js",
+  "assets/js/xiaorui-canonical/playback_adapter.js",
+  "assets/js/xiaorui-canonical/realtime_vertical_slice.js",
+  "assets/js/xiaorui-realtime.js"
+]) assert.ok(indexHtml.includes(`${assetPath}?v=${widgetAssetVersion}`), `${assetPath} must use the shared widget asset version`);
 
 const staticPaths = [
   "/",
