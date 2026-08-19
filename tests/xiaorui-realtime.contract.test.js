@@ -10,16 +10,17 @@ const repoRoot = path.join(__dirname, "..");
 const canonicalDir = path.join(repoRoot, "assets", "js", "xiaorui-canonical");
 
 const canonicalHashes = {
-  "audio_format_resolver.js": "51b12bd01c08009ef304631873dbd1cadbd8150b96cbf366b21bad2199a6caf9",
-  "device_audio_environment.js": "1dd4559ad42567a62549e9d3d0502549e2732ea1ef8a6a45e38aa3f947baaf13",
-  "playback_adapter.js": "57ec6a6deae57e9ed01d9058a347aaa2449858175d4dfd3a3b0b4e26cf576e31",
-  "realtime_vertical_slice.js": "abdf899eea9ebbab134541afca2249441d6e00df579f6fc470ea6bfb00159245",
-  "recorder_adapter.js": "bebd491e82c300bb5ee9e123b87f57192d5ddec7d1041fcc37931ca125b98117"
+  "audio_format_resolver.js": "47eb4423c44d830f151aa6ebbfef9a6315944f2bc4bdf43e1e5d1e1cd5e84fc2",
+  "device_audio_environment.js": "83d208f135441bf2b842c5a3e9123bf60fde5a5064fd6193fdad46c592cbe2b8",
+  "playback_adapter.js": "3d36a5a2d3827f47a2cf3e189b1e7803c630aae992befb3f91fd82171d4892f7",
+  "realtime_vertical_slice.js": "b0fce7d5997800f94130d57af100c89e16ff7950b9981021ce5d8da8f4fa366b",
+  "recorder_adapter.js": "f9b096b84d8cf543d458abf5c828e79f35bebfb9c10abbbb50478f6e495e1cd0"
 };
 
 for (const [fileName, expectedHash] of Object.entries(canonicalHashes)) {
   const content = fs.readFileSync(path.join(canonicalDir, fileName));
-  assert.equal(crypto.createHash("sha256").update(content).digest("hex"), expectedHash, `${fileName} must remain byte-identical to B`);
+  const gitNormalizedContent = content.toString("utf8").replace(/\r\n/g, "\n");
+  assert.equal(crypto.createHash("sha256").update(gitNormalizedContent).digest("hex"), expectedHash, `${fileName} must remain byte-identical to B after Git line-ending normalization`);
 }
 const welcomeContent = fs.readFileSync(path.join(repoRoot, "static", "audio", "bingtang_session_welcome.mp3"));
 assert.equal(
@@ -144,6 +145,9 @@ app.stream = stream;
 app.microphoneReady = true;
 app.vadRunning = true;
 app.vadAnalyser = audioContext.createAnalyser();
+app.socket = new FakeWebSocket("wss://beta-xiaorui.skywingai.com/ws/realtime");
+app.sessionReady = true;
+app.currentSessionId = "xiaomi-session-welcome-test";
 
 app.welcome.start();
 assert.equal(welcomeAudio.playCalls, 1, "welcome must start exactly once for this session startup");
@@ -266,6 +270,8 @@ const adapterDocument = {
 };
 global.document = adapterDocument;
 global.location = { hostname: "feature-branch.richme-site.pages.dev" };
+Object.defineProperty(global, "navigator", { configurable: true, value: { mediaDevices: { getUserMedia() { return Promise.resolve(liveStream()); } } } });
+global.MediaRecorder = class { static isTypeSupported() { return true; } };
 const adapter = require(path.join(repoRoot, "assets", "js", "xiaorui-realtime.js"));
 assert.equal(adapter.resolveRealtimeEndpoint({ hostname: "feature-branch.richme-site.pages.dev" }), adapter.PREVIEW_ENDPOINT);
 assert.equal(adapter.resolveRealtimeEndpoint({ hostname: "localhost" }), adapter.PREVIEW_ENDPOINT);
@@ -281,6 +287,14 @@ for (const selector of [
 ]) selectors.set(selector, new MockElement());
 const widgetRoot = { querySelector: (selector) => selectors.get(selector) || null };
 const widget = new adapter.RichMeRealtimeWidget(widgetRoot);
+assert.doesNotMatch(
+  fs.readFileSync(path.join(repoRoot, "assets", "js", "xiaorui-realtime.js"), "utf8"),
+  /app\.playback\.clearForLifecycle/,
+  "RichMe must delegate playback lifecycle cleanup to canonical app lifecycle"
+);
+widget.open();
+assert.notEqual(selectors.get("[data-xiaorui-status]").textContent, "準備就緒", "opening before session initialization must not claim ready");
+assert.equal(selectors.get("[data-xiaorui-voice]").disabled, false, "a supported browser must retain an operable voice control");
 widget.renderCanonicalState({
   asr_result: "final",
   localized_transcript: "公司註冊",
@@ -314,6 +328,227 @@ const userBubble = widget.userBubbles.get("utterance-ui");
 assert.equal(userBubble.querySelector("p").textContent, "公司註冊");
 assert.equal(userBubble.dataset.final, "true");
 
+for (const reason of [
+  "microphone_permission_denied",
+  "getUserMedia_rejected",
+  "audio_context_unavailable_for_microphone",
+  "web_audio_capture_failed",
+  "microphone_stream_not_live",
+  "microphone_not_ready_after_welcome"
+]) {
+  widget.renderCanonicalState({
+    welcome_completed: true,
+    microphone_ready: false,
+    microphone_failure_reason: reason,
+    input_gate: "open",
+    listening_active: false,
+    conversation_state: "listening",
+    playback_state: "idle",
+    lifecycle_state: "ACTIVE"
+  }, [{ event: "session_identity_accepted", success: true, sequence: 1, runtime_streaming_provider: "xiaomi_streaming" }]);
+  assert.equal(selectors.get("[data-xiaorui-status-wrap]").dataset.state, "error", `${reason} must be visible even when canonical lifecycle remains ACTIVE`);
+  assert.notEqual(selectors.get("[data-xiaorui-status]").textContent, "正在準備語音", `${reason} must not remain in the preparing state`);
+  assert.equal(selectors.get("[data-xiaorui-retry]").hidden, false, `${reason} must retain reconnect control`);
+}
+
+widget.renderCanonicalState({
+  welcome_completed: true,
+  microphone_ready: true,
+  microphone_failure_reason: "",
+  input_gate: "open",
+  listening_active: true,
+  conversation_state: "listening",
+  playback_state: "idle",
+  lifecycle_state: "ACTIVE"
+}, [{ event: "session_identity_accepted", success: true, sequence: 1, runtime_streaming_provider: "xiaomi_streaming" }]);
+assert.equal(selectors.get("[data-xiaorui-status-wrap]").dataset.state, "ready", "completed welcome with a live microphone must become ready");
+assert.equal(selectors.get("[data-xiaorui-status]").textContent, "準備就緒");
+
+function renderAssistantGeneration(generationId, previousText, answer) {
+  widget.renderAssistantTranscript({ active_playback_generation_id: generationId, display_text: previousText });
+  const midpoint = Math.ceil(answer.length / 2);
+  widget.renderAssistantTranscript({ active_playback_generation_id: generationId, display_text: `${previousText}${answer.slice(0, midpoint)}` });
+  const incrementalBubble = widget.assistantBubbles.get(generationId);
+  assert.equal(incrementalBubble.querySelector("p").textContent, answer.slice(0, midpoint), `${generationId} must render incremental text in its own bubble`);
+  widget.renderAssistantTranscript({ active_playback_generation_id: generationId, display_text: `${previousText}${answer}` });
+  assert.equal(incrementalBubble.querySelector("p").textContent, answer, `${generationId} must render the complete rolling text`);
+  widget.renderAssistantTranscript({ active_playback_generation_id: generationId, display_text: answer });
+  assert.equal(incrementalBubble.querySelector("p").textContent, answer, `${generationId} generation-local replacement must preserve its full prefix`);
+  widget.renderAssistantTranscript({ active_playback_generation_id: "", display_text: answer });
+  return answer;
+}
+
+let assistantDisplay = renderAssistantGeneration("generation-ui-1", "", "OK");
+assistantDisplay = renderAssistantGeneration("generation-ui-2", assistantDisplay, "Long answer number two");
+assistantDisplay = renderAssistantGeneration("generation-ui-3", assistantDisplay, "Three");
+assistantDisplay = renderAssistantGeneration("generation-ui-4", assistantDisplay, "A much longer fourth answer");
+assistantDisplay = renderAssistantGeneration("generation-ui-5", assistantDisplay, "Five");
+assert.deepEqual([...widget.assistantBubbles.keys()], [
+  "generation-ui-1", "generation-ui-2", "generation-ui-3", "generation-ui-4", "generation-ui-5"
+]);
+assert.deepEqual(
+  [...widget.assistantBubbles.entries()].map(([generationId, bubble]) => [generationId, bubble.querySelector("p").textContent]),
+  [
+    ["generation-ui-1", "OK"],
+    ["generation-ui-2", "Long answer number two"],
+    ["generation-ui-3", "Three"],
+    ["generation-ui-4", "A much longer fourth answer"],
+    ["generation-ui-5", "Five"]
+  ],
+  "five sequential assistant generations must retain independent complete text"
+);
+
+const restartWelcomeAudio = buildAudio();
+const restartSelectors = new Map();
+for (const selector of [
+  "[data-xiaorui-launch]", "[data-xiaorui-panel]", "[data-xiaorui-close]",
+  "[data-xiaorui-status-wrap]", "[data-xiaorui-status]", "[data-xiaorui-transcript]",
+  "[data-xiaorui-hint]", "[data-xiaorui-voice]", "[data-xiaorui-voice-label]",
+  "[data-xiaorui-retry]", "[data-xiaorui-welcome]"
+]) restartSelectors.set(selector, selector === "[data-xiaorui-welcome]" ? restartWelcomeAudio : new MockElement());
+const restartWidget = new adapter.RichMeRealtimeWidget({ querySelector: (selector) => restartSelectors.get(selector) || null });
+const restartApp = new adapter.RichMeCanonicalApp({
+  endpoint: adapter.PREVIEW_ENDPOINT,
+  commit: "8bf9218a3f09d884d92e1ffc87417c80960ffa3e",
+  welcomeAudio: restartWelcomeAudio,
+  render: (diagnostics, trace) => restartWidget.renderCanonicalState(diagnostics, trace)
+});
+restartWidget.app = restartApp;
+let canonicalStopCalls = 0;
+let canonicalPlaybackClears = 0;
+const originalRestartStop = restartApp.stop.bind(restartApp);
+const originalRestartClear = restartApp.playback.clearForLifecycle.bind(restartApp.playback);
+restartApp.stop = () => { canonicalStopCalls += 1; return originalRestartStop(); };
+restartApp.playback.clearForLifecycle = (...args) => { canonicalPlaybackClears += 1; return originalRestartClear(...args); };
+
+await restartApp.start();
+restartWelcomeAudio.emit("playing");
+restartWelcomeAudio.emit("ended");
+restartApp.handleServerEvent({
+  type: "server.session.created",
+  session: { session_id: "restart-session-1", runtime_streaming_provider: "xiaomi_streaming" },
+  metadata: { session_id: "restart-session-1", runtime_streaming_provider: "xiaomi_streaming" }
+});
+assert.equal(restartWelcomeAudio.playCalls, 1, "first restart-regression session must play one welcome");
+assert.equal(restartApp.sessionReady, true, "first restart-regression session must become authoritative");
+assert.equal(restartApp.inputGate.value, "open", "first restart-regression session must become usable");
+canonicalPlaybackClears = 0;
+
+restartWidget.stopConversation();
+assert.equal(canonicalStopCalls, 1, "adapter stop must delegate to canonical app.stop()");
+assert.equal(canonicalPlaybackClears, 1, "canonical app.stop() must own the single playback lifecycle clear");
+
+await restartApp.start();
+restartWelcomeAudio.emit("playing");
+restartWelcomeAudio.emit("ended");
+restartApp.handleServerEvent({
+  type: "server.session.created",
+  session: { session_id: "restart-session-2", runtime_streaming_provider: "xiaomi_streaming" },
+  metadata: { session_id: "restart-session-2", runtime_streaming_provider: "xiaomi_streaming" }
+});
+assert.equal(restartWelcomeAudio.playCalls, 2, "second start must play exactly one new welcome");
+assert.equal(restartApp.currentSessionId, "restart-session-2", "second authoritative session must replace the first");
+assert.equal(restartApp.sessionReady, true, "second restart-regression session must become authoritative");
+assert.equal(restartApp.inputGate.value, "open", "second restart-regression session must become usable");
+await restartApp.sendVoiceBlob(new Blob(["abc"], { type: "audio/mp4" }), "restart-turn", 1, "audio/mp4", null);
+assert.equal(socketInstances.at(-1).sent.at(-1).type, "client.voice.turn.start", "a new turn must proceed after same-instance restart");
+assert.equal(canonicalPlaybackClears, 2, "canonical lifecycle reset must own playback lifecycle clearing");
+
+const disconnectSelectors = new Map();
+for (const selector of [
+  "[data-xiaorui-launch]", "[data-xiaorui-panel]", "[data-xiaorui-close]",
+  "[data-xiaorui-status-wrap]", "[data-xiaorui-status]", "[data-xiaorui-transcript]",
+  "[data-xiaorui-hint]", "[data-xiaorui-voice]", "[data-xiaorui-voice-label]",
+  "[data-xiaorui-retry]", "[data-xiaorui-welcome]"
+]) disconnectSelectors.set(selector, new MockElement());
+const disconnectedWidget = new adapter.RichMeRealtimeWidget({ querySelector: (selector) => disconnectSelectors.get(selector) || null });
+disconnectedWidget.authoritativeSessionReady = true;
+const disconnectLogs = [];
+const originalConsoleWarn = console.warn;
+console.warn = (...args) => disconnectLogs.push(args);
+const unexpectedDisconnect = {
+  websocket_connected: false,
+  websocket_close_initiator: "browser_or_backend",
+  websocket_close_code: "1006",
+  websocket_close_reason: "network_lost",
+  last_server_event_before_close: "server.session.created",
+  last_client_event_before_close: "client.session.start",
+  current_session_id: "session-preview-1",
+  conversation_state: "disconnected",
+  input_gate: "closed",
+  listening_active: false,
+  lifecycle_state: "ACTIVE"
+};
+disconnectedWidget.renderCanonicalState(unexpectedDisconnect, [{ event: "session_identity_accepted", success: true, sequence: 1, runtime_streaming_provider: "xiaomi_streaming" }]);
+console.warn = originalConsoleWarn;
+assert.equal(disconnectSelectors.get("[data-xiaorui-status-wrap]").dataset.state, "error", "disconnected authoritative session must be visible");
+assert.notEqual(disconnectSelectors.get("[data-xiaorui-status]").textContent, "正在準備語音", "disconnected session must not fall back to preparing");
+assert.equal(disconnectSelectors.get("[data-xiaorui-retry]").hidden, false, "disconnected session must retain reconnect control");
+assert.equal(disconnectLogs.length, 1, "unexpected disconnect must emit one concise console diagnostic");
+assert.deepEqual(disconnectLogs[0][1], {
+  websocket_close_initiator: "browser_or_backend",
+  websocket_close_code: "1006",
+  websocket_close_reason: "network_lost",
+  last_server_event_before_close: "server.session.created",
+  last_client_event_before_close: "client.session.start",
+  current_session_id: "session-preview-1",
+  conversation_state: "disconnected",
+  input_gate: "closed",
+  listening_active: false
+});
+
+widget.renderCanonicalState({
+  welcome_completed: true,
+  microphone_ready: true,
+  microphone_failure_reason: "",
+  input_gate: "open",
+  listening_active: true,
+  websocket_connected: true,
+  conversation_state: "listening",
+  playback_state: "idle",
+  lifecycle_state: "ACTIVE"
+}, [{ event: "session_identity_accepted", success: true, sequence: 1, runtime_streaming_provider: "xiaomi_streaming" }]);
+assert.equal(selectors.get("[data-xiaorui-status-wrap]").dataset.state, "ready", "session must reach ready before a later disconnect");
+widget.renderCanonicalState({
+  ...unexpectedDisconnect,
+  websocket_close_initiator: "backend_session_closed",
+  websocket_close_code: "server.session.closed",
+  websocket_close_reason: "server_session_closed"
+}, [{ event: "session_identity_accepted", success: true, sequence: 1, runtime_streaming_provider: "xiaomi_streaming" }]);
+assert.equal(selectors.get("[data-xiaorui-status-wrap]").dataset.state, "error", "ready session must transition to disconnected state after close");
+assert.notEqual(selectors.get("[data-xiaorui-status]").textContent, "正在準備語音", "ready session close must not return to preparing");
+assert.equal(selectors.get("[data-xiaorui-retry]").hidden, false, "ready session close must retain reconnect control");
+
+widget.started = false;
+widget.starting = false;
+widget.renderCanonicalState({
+  ...unexpectedDisconnect,
+  websocket_close_initiator: "user_stop"
+}, [{ event: "session_identity_accepted", success: true, sequence: 1, runtime_streaming_provider: "xiaomi_streaming" }]);
+assert.equal(selectors.get("[data-xiaorui-status]").textContent, "可以開始語音對話", "intentional stop must return to the available state without a disconnect error");
+
+const missingSelectors = new Map(selectors);
+missingSelectors.delete("[data-xiaorui-voice]");
+missingSelectors.delete("[data-xiaorui-voice-label]");
+const missingDomWidget = new adapter.RichMeRealtimeWidget({ querySelector: (selector) => missingSelectors.get(selector) || null });
+assert.equal(missingSelectors.get("[data-xiaorui-status-wrap]").dataset.state, "error", "missing controls must present a visible error state");
+assert.ok(missingSelectors.get("[data-xiaorui-panel]").children.some((child) => child.className === "xiaorui-controls"), "missing controls must mount a visible fallback control area");
+
+const unsupportedSelectors = new Map();
+for (const selector of [
+  "[data-xiaorui-launch]", "[data-xiaorui-panel]", "[data-xiaorui-close]",
+  "[data-xiaorui-status-wrap]", "[data-xiaorui-status]", "[data-xiaorui-transcript]",
+  "[data-xiaorui-hint]", "[data-xiaorui-voice]", "[data-xiaorui-voice-label]",
+  "[data-xiaorui-retry]", "[data-xiaorui-welcome]"
+]) unsupportedSelectors.set(selector, new MockElement());
+const supportedNavigator = global.navigator;
+Object.defineProperty(global, "navigator", { configurable: true, value: {} });
+const unsupportedWidget = new adapter.RichMeRealtimeWidget({ querySelector: (selector) => unsupportedSelectors.get(selector) || null });
+unsupportedWidget.open();
+assert.equal(unsupportedSelectors.get("[data-xiaorui-status-wrap]").dataset.state, "error", "unsupported voice APIs must not claim ready");
+assert.equal(unsupportedSelectors.get("[data-xiaorui-voice]").disabled, true, "unsupported voice APIs must retain a visible disabled control");
+Object.defineProperty(global, "navigator", { configurable: true, value: supportedNavigator });
+
 const headers = fs.readFileSync(path.join(repoRoot, "_headers"), "utf8");
 assert.match(headers, /Permissions-Policy: camera=\(\), geolocation=\(\), microphone=\(self\)/);
 assert.match(headers, /wss:\/\/beta-xiaorui\.skywingai\.com/);
@@ -324,6 +559,22 @@ assert.doesNotMatch(headers, /media-src[^\n]*\*/);
 const adapterSource = fs.readFileSync(path.join(repoRoot, "assets", "js", "xiaorui-realtime.js"), "utf8");
 assert.doesNotMatch(adapterSource, /new WebSocket\(/, "UI adapter must not own the WebSocket state machine");
 assert.doesNotMatch(adapterSource, /pcm16le|server\.voice\.turn\.completed|server\.audio\.chunk/, "UI adapter must not reimplement canonical PCM or terminal handling");
+assert.doesNotMatch(adapterSource, /inputGate|server\.generation/, "UI adapter must not own canonical input-gate or generation-terminal state");
+
+const indexHtml = fs.readFileSync(path.join(repoRoot, "index.html"), "utf8");
+const siteCss = fs.readFileSync(path.join(repoRoot, "assets", "css", "site.css"), "utf8");
+assert.match(siteCss, /\.xiaorui-conversation\s*\{[^}]*overflow:\s*hidden[^}]*flex:\s*1 1 auto/s, "conversation layout must constrain scrolling content instead of clipping controls");
+assert.match(siteCss, /\.xiaorui-controls\s*\{\s*flex:\s*0 0 auto;/, "controls must not shrink out of the panel");
+const widgetAssetVersion = "xiaorui-validated-8bf9218";
+for (const assetPath of [
+  "assets/css/site.css",
+  "assets/js/xiaorui-canonical/audio_format_resolver.js",
+  "assets/js/xiaorui-canonical/device_audio_environment.js",
+  "assets/js/xiaorui-canonical/recorder_adapter.js",
+  "assets/js/xiaorui-canonical/playback_adapter.js",
+  "assets/js/xiaorui-canonical/realtime_vertical_slice.js",
+  "assets/js/xiaorui-realtime.js"
+]) assert.ok(indexHtml.includes(`${assetPath}?v=${widgetAssetVersion}`), `${assetPath} must use the shared widget asset version`);
 
 const staticPaths = [
   "/",

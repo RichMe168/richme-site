@@ -1,10 +1,10 @@
 # XiaoRui canonical browser runtime
 
-These files are vendored without source changes from:
+These files are vendored without source changes from the validated XiaoRui release:
 
-- Repository: `C:\Users\mamam\Desktop\xiaorui_realtime_rebuild`
-- Branch: `main`
-- Commit: `32ffb2feae3b5d3fceeb1fb0e722555350388f00`
+- Repository: `mamameya111-sketch/xiaorui-realtime`
+- Validated tag: `xiaorui-realtime-2026-08-19-validated`
+- Commit: `8bf9218a3f09d884d92e1ffc87417c80960ffa3e`
 
 The RichMe-specific DOM rendering and Preview/production endpoint selection stay in
 `assets/js/xiaorui-realtime.js`. Do not move WebSocket, session ownership, ASR,

@@ -8,7 +8,9 @@
     postPlaybackEchoGuardMs: 700,
     analyserFftSize: 1024,
     pcmSampleRate: 24000,
-    pcmSafetySeconds: 0.08
+    pcmSafetySeconds: 0.08,
+    // Keep latency low while bounding future AudioBufferSourceNode backlog on mobile.
+    pcmMaxSchedulingAheadSeconds: 0.5
   });
 
   function nowMs() { return Date.now(); }
@@ -119,6 +121,14 @@
       this.started = false;
       this.completed = false;
     }
+    reset() {
+      this.welcomeId = "";
+      this.started = false;
+      this.completed = false;
+    }
+    owns(welcomeId) {
+      return Boolean(this.started && welcomeId && welcomeId === this.welcomeId);
+    }
     start() {
       if (this.started) return;
       this.welcomeId = makeId("welcome");
@@ -137,35 +147,42 @@
         return;
       }
       audio.src = `${CONFIG.welcomeUrl}?v=8b80c33e9dd249ea2258735f393121d6e7f1f65b4a695229fe26695508adcb4a`;
-      this.app.registerWelcomeElement(audio, this.welcomeId);
-      this.app.recordEvent("welcome_play_attempted", { welcome_id: this.welcomeId, welcome_element_id: this.app.welcomeElementIdentity(audio), ...this.app.safeWelcomeMediaSnapshot(audio) });
+      const welcomeId = this.welcomeId;
+      this.app.registerWelcomeElement(audio, welcomeId);
+      this.app.recordEvent("welcome_play_attempted", { welcome_id: welcomeId, welcome_element_id: this.app.welcomeElementIdentity(audio), ...this.app.safeWelcomeMediaSnapshot(audio) });
       let promise;
       try {
         promise = audio.play();
       } catch (error) {
-        this.app.recordEvent("welcome_play_rejected", { welcome_id: this.welcomeId, failure_reason: "play_threw", error_name: String(error && error.name || ""), error_message: String(error && error.message || error || ""), ...this.app.safeWelcomeMediaSnapshot(audio) });
-        this.fail("local_welcome_play_failed");
+        this.app.recordEvent("welcome_play_rejected", { welcome_id: welcomeId, failure_reason: "play_threw", error_name: String(error && error.name || ""), error_message: String(error && error.message || error || ""), ...this.app.safeWelcomeMediaSnapshot(audio) });
+        this.fail("local_welcome_play_failed", welcomeId);
         return;
       }
       this.app.welcomePlayPromise = promise || Promise.resolve();
       if (promise && typeof promise.then === "function") {
         promise.then(() => {
+          if (!this.owns(welcomeId)) return;
           this.app.m2a.welcomePlayResolved = true;
-          this.app.recordEvent("welcome_play_resolved", { welcome_id: this.welcomeId, success: true, ...this.app.safeWelcomeMediaSnapshot(audio) });
+          this.app.recordEvent("welcome_play_resolved", { welcome_id: welcomeId, success: true, ...this.app.safeWelcomeMediaSnapshot(audio) });
           this.app.updateM2aDiagnostics();
         }).catch((error) => {
+          if (!this.owns(welcomeId)) return;
           this.app.m2a.welcomePlayRejected = true;
           this.app.m2a.failureReason = "welcome_play_rejected";
-          this.app.recordEvent("welcome_play_rejected", { welcome_id: this.welcomeId, failure_reason: "play_promise_rejected", error_name: String(error && error.name || ""), error_message: String(error && error.message || error || ""), ...this.app.safeWelcomeMediaSnapshot(audio) });
-          this.fail("local_welcome_play_failed");
+          this.app.recordEvent("welcome_play_rejected", { welcome_id: welcomeId, failure_reason: "play_promise_rejected", error_name: String(error && error.name || ""), error_message: String(error && error.message || error || ""), ...this.app.safeWelcomeMediaSnapshot(audio) });
+          this.fail("local_welcome_play_failed", welcomeId);
         });
       } else {
         this.app.m2a.welcomePlayResolved = true;
-        this.app.recordEvent("welcome_play_resolved", { welcome_id: this.welcomeId, success: true, promise_supported: false, ...this.app.safeWelcomeMediaSnapshot(audio) });
+        this.app.recordEvent("welcome_play_resolved", { welcome_id: welcomeId, success: true, promise_supported: false, ...this.app.safeWelcomeMediaSnapshot(audio) });
         this.app.updateM2aDiagnostics();
       }
     }
-    complete(source) {
+    complete(source, welcomeId) {
+      if (welcomeId && !this.owns(welcomeId)) {
+        this.app.trace("Stale Session Welcome Completion Ignored", { welcome_id: welcomeId, current_welcome_id: this.welcomeId });
+        return;
+      }
       if (this.completed) return;
       this.completed = true;
       if (this.app.m2a) this.app.m2a.welcomeEnded = true;
@@ -177,7 +194,11 @@
       if (typeof this.app.updateM2aDiagnostics === "function") this.app.updateM2aDiagnostics();
       this.app.openListening("welcome_completed");
     }
-    fail(reason) {
+    fail(reason, welcomeId) {
+      if (welcomeId && !this.owns(welcomeId)) {
+        this.app.trace("Stale Session Welcome Failure Ignored", { welcome_id: welcomeId, current_welcome_id: this.welcomeId, reason });
+        return;
+      }
       this.completed = true;
       if (this.app.m2a) this.app.m2a.failureReason = reason;
       this.app.trace("Session Welcome Failed", { reason, welcome_id: this.welcomeId });
@@ -482,8 +503,33 @@
       this.app.state.listening_active = false;
       if (this.app.inputGate.value !== "closed") this.app.inputGate.set("closed", "pcm_playback_started", { generation_id: generationId });
       const queueItem = { id: chunkId, generation_id: generationId, segment_id: segmentId, chunk_id: chunkId, event };
-      this.audioQueue.push(queueItem);
       this.scheduledChunkIds.add(chunkId);
+      this.pendingPcmChunks.push(queueItem);
+      this.drainPendingPcm(generationId, false);
+    }
+    drainPendingPcm(generationId, continueAtAnchor) {
+      if (!generationId || generationId !== this.app.generation.generationId) return;
+      let continueScheduling = Boolean(continueAtAnchor);
+      while (this.pendingPcmChunks.length > 0) {
+        const queueItem = this.pendingPcmChunks[0];
+        if (queueItem.generation_id !== generationId) {
+          this.pendingPcmChunks.shift();
+          continue;
+        }
+        const currentTime = this.audioContextCurrentTime();
+        const scheduledEnd = this.scheduledAudioEndTimeForGeneration(generationId);
+        const schedulingAhead = Math.max(0, scheduledEnd - currentTime);
+        if (schedulingAhead >= CONFIG.pcmMaxSchedulingAheadSeconds && (scheduledEnd > 0 || this.activeSourceCount(generationId) > 0)) break;
+        this.pendingPcmChunks.shift();
+        this.schedulePendingChunk(queueItem, continueScheduling);
+        continueScheduling = true;
+      }
+      this.app.updateDiagnostics(this.diagnostics());
+    }
+    schedulePendingChunk(queueItem, continueAtAnchor) {
+      const { event, generation_id: generationId, id: chunkId, segment_id: segmentId } = queueItem;
+      const metadata = event.metadata || {};
+      this.audioQueue.push(queueItem);
       const bytes = base64ToBytes(event.audio_chunk_b64 || metadata.audio_chunk_b64 || "");
       const playbackApi = root.XiaoRuiPlaybackAdapter;
       const samples = playbackApi.pcm16leBytesToFloat32(bytes);
@@ -497,7 +543,9 @@
       source.__xiaorui_playback_epoch = this.app.playbackEpoch;
       source.connect(this.context.destination);
       const currentGenerationEnd = this.scheduledAudioEndTimeForGeneration(generationId);
-      const scheduledStart = Math.max(this.context.currentTime + CONFIG.pcmSafetySeconds, currentGenerationEnd || 0);
+      const scheduledStart = continueAtAnchor
+        ? Math.max(this.context.currentTime, currentGenerationEnd || 0)
+        : Math.max(this.context.currentTime + CONFIG.pcmSafetySeconds, currentGenerationEnd || 0);
       const scheduledEnd = scheduledStart + buffer.duration;
       this.scheduledAudioEndTimes.set(generationId, scheduledEnd);
       this.scheduledAudioEndTime = Math.max(this.scheduledAudioEndTime || 0, scheduledEnd);
@@ -517,6 +565,7 @@
         this.audioQueue = this.audioQueue.filter((item) => item.id !== chunkId);
         this.app.generation.recordPlayed(chunkId);
         this.app.trace("PCM Source Ended", { chunk_id: chunkId, generation_id: generationId, audio_queue_length: this.audioQueueLength(generationId), active_pcm_source_count: this.activeSourceCount(generationId) });
+        this.drainPendingPcm(generationId, true);
         this.app.generation.completeIfReady("source_ended");
         this.app.updateDiagnostics(this.diagnostics());
       };
@@ -531,7 +580,8 @@
         active_pcm_source_ids: this.activeSourceIds(generationId),
         pending_pcm_chunk_count: this.pendingPcmChunkCount(generationId),
         scheduled_audio_end_time: this.scheduledAudioEndTimeForGeneration(generationId),
-        audio_context_current_time: this.audioContextCurrentTime()
+        audio_context_current_time: this.audioContextCurrentTime(),
+        scheduling_ahead_ms: Math.max(0, this.scheduledAudioEndTimeForGeneration(generationId) - this.audioContextCurrentTime()) * 1000
       };
     }
   }
@@ -903,6 +953,7 @@
       this.restoreAttempt = 0;
       this.restoreToken = "";
       this.m2StartupCompleted = false;
+      this.explicitSessionEpoch = 0;
       this.vadLoopToken = 0;
       this.playbackEpoch = 0;
       this.welcomeAudio = this.options.welcomeAudio;
@@ -1449,22 +1500,25 @@
     }
     registerWelcomeElement(audio, welcomeId) {
       const onPlaying = () => {
+        if (!this.welcome.owns(welcomeId)) return;
         this.m2a.welcomePlaying = true;
         this.setPlaybackState("playing", "welcome_media_playing", { welcome_id: welcomeId });
         this.recordEvent("welcome_media_playing", { welcome_id: welcomeId, success: true, ...this.safeWelcomeMediaSnapshot(audio) });
         this.updateM2aDiagnostics();
       };
       const onEnded = () => {
+        if (!this.welcome.owns(welcomeId)) return;
         this.recordEvent("welcome_media_ended", { welcome_id: welcomeId, success: true, ...this.safeWelcomeMediaSnapshot(audio) });
         this.startupInProgress = false;
-        this.welcome.complete("html_audio_element");
+        this.welcome.complete("html_audio_element", welcomeId);
       };
       const onError = () => {
+        if (!this.welcome.owns(welcomeId)) return;
         this.m2a.welcomeErrored = true;
         this.m2a.failureReason = "welcome_media_error";
         this.recordEvent("welcome_media_error", { welcome_id: welcomeId, failure_reason: "media_error", ...this.safeWelcomeMediaSnapshot(audio) });
         this.startupInProgress = false;
-        this.welcome.fail("local_welcome_asset_failed");
+        this.welcome.fail("local_welcome_asset_failed", welcomeId);
       };
       if (typeof audio.addEventListener === "function") {
         audio.addEventListener("playing", onPlaying, { once: true });
@@ -1478,17 +1532,160 @@
     }
     wsUrl() { return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/realtime`; }
     async start() {
+      this.explicitSessionEpoch += 1;
+      const sessionEpoch = this.explicitSessionEpoch;
+      this.resetExplicitSessionState("explicit_session_start");
       this.startupInProgress = true;
       this.recordEvent("start_gesture_received", { success: true });
       this.state.conversation_state = "connecting_welcoming";
       this.inputGate.set("assistant_playing", "connect_clicked");
       this.updateDiagnostics({ conversation_state: "connecting_welcoming" });
-      this.initiateAudioContextFromGesture();
+      this.initiateAudioContextFromGesture(sessionEpoch);
       this.welcome.start();
       void this.connectWebSocket();
-      await this.initializeAudio();
+      await this.initializeAudio(sessionEpoch);
     }
-    initiateAudioContextFromGesture() {
+    isCurrentExplicitSession(sessionEpoch) {
+      return sessionEpoch === this.explicitSessionEpoch;
+    }
+    resetM2aState() {
+      this.m2a = {
+        audioContextRunningConfirmed: false,
+        audioContextResumeResolved: false,
+        audioContextResumeRejected: false,
+        welcomePlayResolved: false,
+        welcomePlayRejected: false,
+        welcomePlaying: false,
+        welcomeEnded: false,
+        welcomeErrored: false,
+        failureReason: ""
+      };
+    }
+    resetExplicitSessionState(reason) {
+      this.welcome.reset();
+      this.turn.clearForLifecycle(reason, "");
+      this.turn.turnCount = 0;
+      this.stopVadRuntime(reason);
+      this.playback.clearForLifecycle(reason, "");
+      this.generation.reset();
+      this.pendingBlobs = [];
+      this.socketSessionReadyResolvers.forEach((pending) => {
+        if (pending && typeof pending.reject === "function") pending.reject(new Error("explicit_session_reset"));
+      });
+      this.socketSessionReadyResolvers.clear();
+      this.sessionReady = false;
+      this.currentSessionId = "";
+      this.socketInstanceId = "";
+      this.stream = null;
+      this.microphoneReady = false;
+      this.microphoneFailureReason = "";
+      this.firstTurnCompleted = false;
+      this.lastCompletedTurnId = "";
+      this.lastFailedTurnId = "";
+      this.lastSuccessfulTranscript = "";
+      this.recoverableEmptyTranscriptCount = 0;
+      this.staleTurnFailureIgnoredCount = 0;
+      this.sessionPcmReceivedTotal = 0;
+      this.sessionPcmScheduledTotal = 0;
+      this.sessionPcmPlayedTotal = 0;
+      this.sessionPcmIgnoredTotal = 0;
+      this.m2StartupCompleted = false;
+      this.startupInProgress = false;
+      this.lifecycleInterrupted = false;
+      this.audioContextResumePromise = null;
+      this.welcomePlayPromise = null;
+      this.lifecycleState = "ACTIVE";
+      this.restoreNeeded = false;
+      this.restoreInProgress = false;
+      this.restoreToken = "";
+      this.postRestoreOwner = null;
+      this.postRestoreRecordingOwner = null;
+      this.postRestoreGenerationOwner = null;
+      this.awaitingPostRestoreTurn = false;
+      this.postRestoreTurnId = "";
+      this.postRestoreTurnCompleted = false;
+      this.state.conversation_state = "disconnected";
+      this.state.playback_state = "idle";
+      this.state.listening_active = false;
+      this.state.websocket_connected = false;
+      this.state.generation_completed = false;
+      this.state.active_playback_generation_id = "";
+      this.state.active_turn_id = "";
+      this.state.last_assistant_playback_completed_at = 0;
+      this.state.playback_scope = "";
+      this.state.welcome_id = "";
+      this.resetM2aState();
+      this.inputGate.set("closed", reason);
+      this.updateDiagnostics({
+        welcome_started: false,
+        welcome_completed: false,
+        welcome_failed: false,
+        welcome_failure_reason: "",
+        session_id: "",
+        current_session_id: "",
+        socket_instance_id: "",
+        turn_count: 0,
+        asr_result: "not_started",
+        localized_transcript: "",
+        raw_assistant_text: "",
+        normalized_assistant_text: "",
+        display_text: "",
+        tts_input_text: "",
+        generation_completed: false,
+        generation_completed_at: "",
+        generation_terminal_event_type: "",
+        generation_terminal_event_received_at: "",
+        generation_terminal_generation_id: "",
+        generation_completion_blockers: [],
+        pcm_received: 0,
+        pcm_scheduled: 0,
+        pcm_played: 0,
+        pcm_ignored: 0,
+        generation_pcm_received: 0,
+        generation_pcm_scheduled: 0,
+        generation_pcm_played: 0,
+        generation_pcm_ignored: 0,
+        session_pcm_received_total: 0,
+        session_pcm_scheduled_total: 0,
+        session_pcm_played_total: 0,
+        session_pcm_ignored_total: 0,
+        pcm_ignored_reason_counts: { stale_generation: 0, missing_generation_id: 0, no_active_generation: 0, duplicate_chunk: 0 },
+        active_playback_generation_id: "",
+        active_turn_id: "",
+        current_active_turn_id: "",
+        audio_queue_length: 0,
+        active_pcm_source_count: 0,
+        pending_pcm_chunk_count: 0,
+        pending_segment_count: 0,
+        active_pcm_source_ids: [],
+        pending_utterance_count: 0,
+        microphone_ready: false,
+        microphone_failure_reason: "",
+        mic_stream_active: false,
+        first_turn_completed: false,
+        last_completed_turn_id: "",
+        last_completed_turn_outcome: "",
+        last_failed_turn_id: "",
+        last_failed_turn_error_type: "",
+        last_successful_transcript: "",
+        last_empty_transcript_at: "",
+        recoverable_empty_transcript_count: 0,
+        stale_turn_failure_ignored_count: 0,
+        m2_startup_completed: false,
+        m2a_status: "not_started",
+        m2a_local_acceptance_ready: false,
+        audio_context_running_confirmed: false,
+        welcome_play_resolved: false,
+        welcome_media_playing: false,
+        welcome_media_ended: false,
+        lifecycle_interrupted: false,
+        m2a_failure_reason: "",
+        listening_active: false,
+        conversation_state: "disconnected",
+        playback_state: "idle"
+      });
+    }
+    initiateAudioContextFromGesture(sessionEpoch) {
       this.recordEvent("audio_context_create_attempted", { success: true });
       const Ctor = root.AudioContext || root.webkitAudioContext;
       if (!Ctor) {
@@ -1510,10 +1707,12 @@
         resumePromise = Promise.reject(error);
       }
       this.audioContextResumePromise = Promise.resolve(resumePromise).then(() => {
+        if (sessionEpoch && !this.isCurrentExplicitSession(sessionEpoch)) return;
         this.m2a.audioContextResumeResolved = true;
         this.recordEvent("audio_context_resume_resolved", { success: true, audio_context_state: String(this.audioContext && this.audioContext.state || "") });
         this.confirmAudioContextRunning("resume_resolved");
       }).catch((error) => {
+        if (sessionEpoch && !this.isCurrentExplicitSession(sessionEpoch)) return;
         this.m2a.audioContextResumeRejected = true;
         this.m2a.failureReason = "audio_context_resume_rejected";
         this.recordEvent("audio_context_resume_rejected", { failure_reason: "resume_promise_rejected", error_name: String(error && error.name || ""), error_message: String(error && error.message || error || ""), audio_context_state: String(this.audioContext && this.audioContext.state || "") });
@@ -1533,7 +1732,7 @@
       this.updateM2aDiagnostics();
       return true;
     }
-    async initializeAudio() {
+    async initializeAudio(sessionEpoch) {
       const resolver = root.XiaoRuiAudioFormatResolver;
       const selected = resolver.selectSupportedMime(root.MediaRecorder);
       this.selectedMime = selected.selectedInputMime;
@@ -1548,7 +1747,12 @@
         return false;
       }
       try {
-        this.stream = await nav.mediaDevices.getUserMedia(root.XiaoRuiRecorderAdapter.audioInputConstraints());
+        const stream = await nav.mediaDevices.getUserMedia(root.XiaoRuiRecorderAdapter.audioInputConstraints());
+        if (sessionEpoch && !this.isCurrentExplicitSession(sessionEpoch)) {
+          if (stream && typeof stream.getTracks === "function") stream.getTracks().forEach((track) => { if (track && typeof track.stop === "function") track.stop(); });
+          return false;
+        }
+        this.stream = stream;
       } catch (error) {
         const denied = error && (error.name === "NotAllowedError" || error.name === "PermissionDeniedError");
         this.microphoneReady = false;
@@ -1562,6 +1766,7 @@
       if (!this.audioContext) this.initiateAudioContextFromGesture();
       if (this.audioContextResumePromise) await this.audioContextResumePromise;
       else this.confirmAudioContextRunning("initialize_audio");
+      if (sessionEpoch && !this.isCurrentExplicitSession(sessionEpoch)) return false;
       this.playback.setAudioContext(this.audioContext);
       if (!this.audioContext) {
         this.microphoneReady = false;
@@ -1584,6 +1789,7 @@
       if (this.microphoneReady) this.recordEvent("microphone_stream_started", { success: true, selected_mime: this.selectedMime, normalized_mime: selected.normalizedInputMime, converter_key: selected.converterKey, mic_stream_active: true });
       else this.recordEvent("microphone_start_failed", this.failureDetails(this.microphoneFailureReason, null, { selected_mime: this.selectedMime, normalized_mime: selected.normalizedInputMime, converter_key: selected.converterKey }));
       this.updateDiagnostics({ selected_mime: this.selectedMime, normalized_mime: selected.normalizedInputMime, converter_key: selected.converterKey, audio_context_state: this.audioContext.state, mic_stream_active: true });
+      if (this.welcome.completed && this.sessionReady) this.openListening("microphone_ready");
       return this.microphoneReady;
     }
     connectWebSocket(options) {
@@ -1681,14 +1887,36 @@
           return;
         }
       }
+      const startupTransition = reason === "welcome_completed"
+        || reason === "welcome_failed"
+        || reason === "session_ready"
+        || reason === "microphone_ready";
+      const authoritativeSessionReady = Boolean(
+        this.socket
+        && this.socket.readyState === WebSocket.OPEN
+        && this.sessionReady
+        && this.currentSessionId
+      );
+      if (startupTransition && (!this.welcome.completed || !authoritativeSessionReady)) {
+        this.state.conversation_state = "connecting_welcoming";
+        this.state.playback_state = this.welcome.completed ? "idle" : this.state.playback_state;
+        this.state.listening_active = false;
+        this.inputGate.set("closed", "startup_prerequisites_pending", {
+          reason,
+          welcome_completed: this.welcome.completed,
+          authoritative_session_ready: authoritativeSessionReady
+        });
+        this.updateDiagnostics({ listening_active: false, microphone_ready: this.microphoneReadyForRecording() });
+        return;
+      }
       this.state.conversation_state = "listening";
       this.state.playback_state = "idle";
       const microphoneReady = this.microphoneReadyForRecording();
       this.microphoneReady = microphoneReady;
       this.state.listening_active = microphoneReady;
-      this.inputGate.set("open", reason, { microphone_ready: microphoneReady });
+      this.inputGate.set(microphoneReady || !startupTransition ? "open" : "closed", reason, { microphone_ready: microphoneReady });
       if (!microphoneReady) this.recordMicrophoneBlockedAfterWelcome(reason);
-      if (reason === "welcome_completed" && microphoneReady) this.m2StartupCompleted = true;
+      if (microphoneReady) this.m2StartupCompleted = true;
       this.updateDiagnostics({ conversation_state: "listening", playback_state: "idle", listening_active: microphoneReady, websocket_connected: Boolean(this.state.websocket_connected), microphone_ready: microphoneReady });
       this.flushPendingBlobs();
     }
@@ -1793,6 +2021,7 @@
         stack_hint: stackHint || details.stack_hint || "session_identity_accepted"
       });
       this.updateDiagnostics({ websocket_connected: true, provider: "xiaomi", session_id: this.currentSessionId, current_session_id: this.currentSessionId });
+      if (this.welcome.completed) this.openListening("session_ready");
     }
     handleServerEvent(event) {
       const type = event.type;
@@ -1806,6 +2035,12 @@
         this.recordEvent("session_identity_event_received", { ...details, authoritative_session_ready: authoritative });
         if (pending && !authoritative) {
           this.recordEvent("session_identity_non_authoritative", { ...details, blocked_reason: "restore_waiting_for_authoritative_xiaomi_session", authoritative_session_ready: false });
+          this.state.websocket_connected = true;
+          this.updateDiagnostics({ websocket_connected: true });
+          return;
+        }
+        if (!this.postRestoreOwner && !authoritative) {
+          this.recordEvent("session_identity_non_authoritative", { ...details, blocked_reason: "startup_waiting_for_authoritative_xiaomi_session", authoritative_session_ready: false });
           this.state.websocket_connected = true;
           this.updateDiagnostics({ websocket_connected: true });
           return;
@@ -1900,15 +2135,21 @@
       }
       this.turn.fail(event);
     }    stop() {
-      this.vadRunning = false;
+      this.explicitSessionEpoch += 1;
       this.websocketCloseInitiator = "user_stop";
-      if (this.socket && this.socket.readyState === WebSocket.OPEN) this.sendSocketPayload({ type: "client.session.close" }, "stop_conversation");
-      if (this.socket) this.socket.close();
-      if (this.stream) this.stream.getTracks().forEach((track) => track.stop());
-      this.state.conversation_state = "disconnected";
-      this.state.playback_state = "idle";
-      this.state.listening_active = false;
-      this.inputGate.set("closed", "stop_conversation");
+      const socket = this.socket;
+      if (socket && socket.readyState === WebSocket.OPEN) this.sendSocketPayload({ type: "client.session.close" }, "stop_conversation");
+      this.socket = null;
+      if (socket && typeof socket.close === "function") socket.close();
+      if (this.stream && typeof this.stream.getTracks === "function") this.stream.getTracks().forEach((track) => { if (track && typeof track.stop === "function") track.stop(); });
+      const welcomeAudio = this.welcomeAudio;
+      if (welcomeAudio && typeof welcomeAudio.pause === "function") {
+        try { welcomeAudio.pause(); } catch (error) { this.trace("Welcome Audio Stop Failed", { error_message: String(error && error.message || error || "") }); }
+      }
+      if (welcomeAudio && typeof welcomeAudio.currentTime === "number") {
+        try { welcomeAudio.currentTime = 0; } catch (error) { this.trace("Welcome Audio Rewind Failed", { error_message: String(error && error.message || error || "") }); }
+      }
+      this.resetExplicitSessionState("stop_conversation");
       this.updateDiagnostics({ conversation_state: "disconnected", playback_state: "idle", websocket_close_initiator: "user_stop" });
     }
   }

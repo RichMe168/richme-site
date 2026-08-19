@@ -307,6 +307,7 @@ details p { margin: .75rem 0 0; color: var(--muted); }
   bottom: 5.25rem;
   display: flex;
   width: min(400px, calc(100vw - 2rem));
+  height: min(650px, calc(100vh - 7.5rem));
   max-height: min(650px, calc(100vh - 7.5rem));
   overflow: hidden;
   border: 1px solid rgba(20,40,65,.16);
@@ -341,7 +342,8 @@ details p { margin: .75rem 0 0; color: var(--muted); }
   display: flex;
   min-height: 0;
   padding: 1rem;
-  flex: 1;
+  overflow: hidden;
+  flex: 1 1 auto;
   flex-direction: column;
 }
 .xiaorui-status {
@@ -371,7 +373,7 @@ details p { margin: .75rem 0 0; color: var(--muted); }
 .xiaorui-status[data-state="error"] .xiaorui-status-dot { background: #c64242; }
 .xiaorui-transcript {
   display: flex;
-  min-height: 150px;
+  min-height: 0;
   margin: .85rem -.15rem .25rem;
   padding: 0 .15rem .25rem;
   overflow-y: auto;
@@ -392,6 +394,7 @@ details p { margin: .75rem 0 0; color: var(--muted); }
 .xiaorui-bubble-user { align-self: flex-end; border-radius: 15px 15px 4px 15px; background: #eadfca; }
 .xiaorui-hint { min-height: 2.8em; margin: .5rem 0 .85rem; color: var(--muted); font-size: .78rem; line-height: 1.4; text-align: center; }
 .xiaorui-controls { display: grid; gap: .55rem; }
+.xiaorui-controls { flex: 0 0 auto; }
 .xiaorui-voice-button,
 .xiaorui-retry {
   min-height: 50px;
@@ -431,7 +434,7 @@ details p { margin: .75rem 0 0; color: var(--muted); }
   border-radius: 0 0 10px 10px;
   content: "";
 }
-.xiaorui-privacy { margin: 0; padding: .65rem 1rem; border-top: 1px solid var(--line); color: #7b8693; background: #f7f5f0; font-size: .7rem; text-align: center; }
+.xiaorui-privacy { flex: 0 0 auto; margin: 0; padding: .65rem 1rem; border-top: 1px solid var(--line); color: #7b8693; background: #f7f5f0; font-size: .7rem; text-align: center; }
 @keyframes xiaorui-pulse { 50% { opacity: .35; transform: scale(.8); } }
 :focus-visible { outline: 3px solid var(--gold-light); outline-offset: 3px; }
 
@@ -487,9 +490,9 @@ details p { margin: .75rem 0 0; color: var(--muted); }
   .xiaorui-widget { right: .75rem; bottom: .75rem; }
   .xiaorui-launcher { min-width: 152px; min-height: 56px; padding-left: 3.9rem; }
   .xiaorui-launcher > img { width: 68px; height: 86px; }
-  .xiaorui-panel { bottom: 4.75rem; max-height: calc(100vh - 6.5rem); }
+  .xiaorui-panel { bottom: 4.75rem; height: calc(100vh - 6.5rem); max-height: calc(100vh - 6.5rem); }
   .xiaorui-conversation { padding: .85rem; }
-  .xiaorui-transcript { min-height: 120px; }
+  .xiaorui-transcript { min-height: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
