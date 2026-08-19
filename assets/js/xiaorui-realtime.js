@@ -77,7 +77,8 @@
       this.userBubbles = new Map();
       this.assistantBubbles = new Map();
       this.activeGenerationId = "";
-      this.generationDisplayOffset = 0;
+      this.generationDisplayBaseline = "";
+      this.generationDisplayText = "";
       this.lastDisplayText = "";
       this.lastDisconnectDiagnosticKey = "";
 
@@ -332,12 +333,20 @@
       const fullDisplayText = String(diagnostics.display_text || "");
       if (generationId && generationId !== this.activeGenerationId) {
         this.activeGenerationId = generationId;
-        this.generationDisplayOffset = this.lastDisplayText.length;
+        this.generationDisplayBaseline = this.lastDisplayText;
+        this.generationDisplayText = "";
       }
+      if (!generationId) {
+        this.lastDisplayText = fullDisplayText;
+        return;
+      }
+      const rollingUpdate = fullDisplayText.startsWith(this.lastDisplayText)
+        && fullDisplayText.length >= this.lastDisplayText.length;
+      this.generationDisplayText = rollingUpdate
+        ? fullDisplayText.slice(this.generationDisplayBaseline.length)
+        : fullDisplayText;
       this.lastDisplayText = fullDisplayText;
-      if (!generationId) return;
-      let displayText = fullDisplayText.slice(this.generationDisplayOffset);
-      if (!displayText && fullDisplayText && this.generationDisplayOffset >= fullDisplayText.length) displayText = fullDisplayText;
+      const displayText = this.generationDisplayText;
       if (!displayText) return;
       let bubble = this.assistantBubbles.get(generationId);
       if (!bubble) {

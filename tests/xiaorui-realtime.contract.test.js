@@ -364,6 +364,40 @@ widget.renderCanonicalState({
 assert.equal(selectors.get("[data-xiaorui-status-wrap]").dataset.state, "ready", "completed welcome with a live microphone must become ready");
 assert.equal(selectors.get("[data-xiaorui-status]").textContent, "準備就緒");
 
+function renderAssistantGeneration(generationId, previousText, answer) {
+  widget.renderAssistantTranscript({ active_playback_generation_id: generationId, display_text: previousText });
+  const midpoint = Math.ceil(answer.length / 2);
+  widget.renderAssistantTranscript({ active_playback_generation_id: generationId, display_text: `${previousText}${answer.slice(0, midpoint)}` });
+  const incrementalBubble = widget.assistantBubbles.get(generationId);
+  assert.equal(incrementalBubble.querySelector("p").textContent, answer.slice(0, midpoint), `${generationId} must render incremental text in its own bubble`);
+  widget.renderAssistantTranscript({ active_playback_generation_id: generationId, display_text: `${previousText}${answer}` });
+  assert.equal(incrementalBubble.querySelector("p").textContent, answer, `${generationId} must render the complete rolling text`);
+  widget.renderAssistantTranscript({ active_playback_generation_id: generationId, display_text: answer });
+  assert.equal(incrementalBubble.querySelector("p").textContent, answer, `${generationId} generation-local replacement must preserve its full prefix`);
+  widget.renderAssistantTranscript({ active_playback_generation_id: "", display_text: answer });
+  return answer;
+}
+
+let assistantDisplay = renderAssistantGeneration("generation-ui-1", "", "OK");
+assistantDisplay = renderAssistantGeneration("generation-ui-2", assistantDisplay, "Long answer number two");
+assistantDisplay = renderAssistantGeneration("generation-ui-3", assistantDisplay, "Three");
+assistantDisplay = renderAssistantGeneration("generation-ui-4", assistantDisplay, "A much longer fourth answer");
+assistantDisplay = renderAssistantGeneration("generation-ui-5", assistantDisplay, "Five");
+assert.deepEqual([...widget.assistantBubbles.keys()], [
+  "generation-ui-1", "generation-ui-2", "generation-ui-3", "generation-ui-4", "generation-ui-5"
+]);
+assert.deepEqual(
+  [...widget.assistantBubbles.entries()].map(([generationId, bubble]) => [generationId, bubble.querySelector("p").textContent]),
+  [
+    ["generation-ui-1", "OK"],
+    ["generation-ui-2", "Long answer number two"],
+    ["generation-ui-3", "Three"],
+    ["generation-ui-4", "A much longer fourth answer"],
+    ["generation-ui-5", "Five"]
+  ],
+  "five sequential assistant generations must retain independent complete text"
+);
+
 const restartWelcomeAudio = buildAudio();
 const restartSelectors = new Map();
 for (const selector of [
@@ -525,6 +559,7 @@ assert.doesNotMatch(headers, /media-src[^\n]*\*/);
 const adapterSource = fs.readFileSync(path.join(repoRoot, "assets", "js", "xiaorui-realtime.js"), "utf8");
 assert.doesNotMatch(adapterSource, /new WebSocket\(/, "UI adapter must not own the WebSocket state machine");
 assert.doesNotMatch(adapterSource, /pcm16le|server\.voice\.turn\.completed|server\.audio\.chunk/, "UI adapter must not reimplement canonical PCM or terminal handling");
+assert.doesNotMatch(adapterSource, /inputGate|server\.generation/, "UI adapter must not own canonical input-gate or generation-terminal state");
 
 const indexHtml = fs.readFileSync(path.join(repoRoot, "index.html"), "utf8");
 const siteCss = fs.readFileSync(path.join(repoRoot, "assets", "css", "site.css"), "utf8");
