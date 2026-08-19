@@ -374,6 +374,8 @@ function renderAssistantGeneration(generationId, previousText, answer) {
   assert.equal(incrementalBubble.querySelector("p").textContent, answer, `${generationId} must render the complete rolling text`);
   widget.renderAssistantTranscript({ active_playback_generation_id: generationId, display_text: answer });
   assert.equal(incrementalBubble.querySelector("p").textContent, answer, `${generationId} generation-local replacement must preserve its full prefix`);
+  widget.renderAssistantTranscript({ active_playback_generation_id: generationId, display_text: answer });
+  assert.equal(incrementalBubble.querySelector("p").textContent, answer, `${generationId} repeated completion snapshot must be idempotent`);
   widget.renderAssistantTranscript({ active_playback_generation_id: "", display_text: answer });
   return answer;
 }
@@ -397,6 +399,30 @@ assert.deepEqual(
   ],
   "five sequential assistant generations must retain independent complete text"
 );
+
+const canonicalOrderGenerationId = "generation-ui-canonical-order";
+widget.renderAssistantTranscript({ active_playback_generation_id: canonicalOrderGenerationId, display_text: assistantDisplay });
+widget.renderAssistantTranscript({ active_playback_generation_id: canonicalOrderGenerationId, display_text: `${assistantDisplay}Canonical response` });
+widget.renderAssistantTranscript({ active_playback_generation_id: canonicalOrderGenerationId, display_text: "Canonical response" });
+widget.renderAssistantTranscript({ active_playback_generation_id: canonicalOrderGenerationId, display_text: "Canonical response" });
+assert.equal(
+  widget.assistantBubbles.get(canonicalOrderGenerationId).querySelector("p").textContent,
+  "Canonical response",
+  "text.done followed by generation.completed with the same final snapshot must remain complete"
+);
+
+let longTraceDisplay = "Canonical response";
+for (let index = 1; index <= 10; index += 1) {
+  const generationId = `generation-ui-long-${index}`;
+  const answer = `Long trace response ${index}`;
+  widget.renderAssistantTranscript({ active_playback_generation_id: generationId, display_text: longTraceDisplay });
+  widget.renderAssistantTranscript({ active_playback_generation_id: generationId, display_text: `${longTraceDisplay}${answer}` });
+  widget.renderAssistantTranscript({ active_playback_generation_id: generationId, display_text: answer });
+  widget.renderAssistantTranscript({ active_playback_generation_id: generationId, display_text: answer });
+  assert.equal(widget.assistantBubbles.get(generationId).querySelector("p").textContent, answer, `${generationId} must survive duplicate completion snapshots`);
+  widget.renderAssistantTranscript({ active_playback_generation_id: "", display_text: answer });
+  longTraceDisplay = answer;
+}
 
 const restartWelcomeAudio = buildAudio();
 const restartSelectors = new Map();
