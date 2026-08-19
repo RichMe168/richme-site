@@ -242,7 +242,7 @@
       if (!CanonicalBase) throw new Error("CanonicalRuntimeUnavailable");
       this.app = new RichMeCanonicalApp({
         endpoint: this.endpoint,
-        commit: "32ffb2feae3b5d3fceeb1fb0e722555350388f00",
+        commit: "8bf9218a3f09d884d92e1ffc87417c80960ffa3e",
         welcomeAudio: this.welcomeAudio,
         render: (diagnostics, trace) => this.renderCanonicalState(diagnostics, trace)
       });
@@ -280,7 +280,6 @@
       this.intentionalStop = true;
       try {
         if (this.app) {
-          if (this.app.playback && typeof this.app.playback.clearForLifecycle === "function") this.app.playback.clearForLifecycle("richme_widget_closed", "richme_ui");
           this.app.stop();
         }
         if (this.welcomeAudio && typeof this.welcomeAudio.pause === "function") this.welcomeAudio.pause();

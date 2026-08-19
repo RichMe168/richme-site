@@ -13,7 +13,7 @@ const canonicalHashes = {
   "audio_format_resolver.js": "47eb4423c44d830f151aa6ebbfef9a6315944f2bc4bdf43e1e5d1e1cd5e84fc2",
   "device_audio_environment.js": "83d208f135441bf2b842c5a3e9123bf60fde5a5064fd6193fdad46c592cbe2b8",
   "playback_adapter.js": "3d36a5a2d3827f47a2cf3e189b1e7803c630aae992befb3f91fd82171d4892f7",
-  "realtime_vertical_slice.js": "f8eb9beb1a6fa8ca35fab506ca1b0400542f836844b09486c7170f3dc7c9ff2d",
+  "realtime_vertical_slice.js": "b0fce7d5997800f94130d57af100c89e16ff7950b9981021ce5d8da8f4fa366b",
   "recorder_adapter.js": "f9b096b84d8cf543d458abf5c828e79f35bebfb9c10abbbb50478f6e495e1cd0"
 };
 
@@ -145,6 +145,9 @@ app.stream = stream;
 app.microphoneReady = true;
 app.vadRunning = true;
 app.vadAnalyser = audioContext.createAnalyser();
+app.socket = new FakeWebSocket("wss://beta-xiaorui.skywingai.com/ws/realtime");
+app.sessionReady = true;
+app.currentSessionId = "xiaomi-session-welcome-test";
 
 app.welcome.start();
 assert.equal(welcomeAudio.playCalls, 1, "welcome must start exactly once for this session startup");
@@ -284,6 +287,11 @@ for (const selector of [
 ]) selectors.set(selector, new MockElement());
 const widgetRoot = { querySelector: (selector) => selectors.get(selector) || null };
 const widget = new adapter.RichMeRealtimeWidget(widgetRoot);
+assert.doesNotMatch(
+  fs.readFileSync(path.join(repoRoot, "assets", "js", "xiaorui-realtime.js"), "utf8"),
+  /app\.playback\.clearForLifecycle/,
+  "RichMe must delegate playback lifecycle cleanup to canonical app lifecycle"
+);
 widget.open();
 assert.notEqual(selectors.get("[data-xiaorui-status]").textContent, "準備就緒", "opening before session initialization must not claim ready");
 assert.equal(selectors.get("[data-xiaorui-voice]").disabled, false, "a supported browser must retain an operable voice control");
@@ -355,6 +363,62 @@ widget.renderCanonicalState({
 }, [{ event: "session_identity_accepted", success: true, sequence: 1, runtime_streaming_provider: "xiaomi_streaming" }]);
 assert.equal(selectors.get("[data-xiaorui-status-wrap]").dataset.state, "ready", "completed welcome with a live microphone must become ready");
 assert.equal(selectors.get("[data-xiaorui-status]").textContent, "準備就緒");
+
+const restartWelcomeAudio = buildAudio();
+const restartSelectors = new Map();
+for (const selector of [
+  "[data-xiaorui-launch]", "[data-xiaorui-panel]", "[data-xiaorui-close]",
+  "[data-xiaorui-status-wrap]", "[data-xiaorui-status]", "[data-xiaorui-transcript]",
+  "[data-xiaorui-hint]", "[data-xiaorui-voice]", "[data-xiaorui-voice-label]",
+  "[data-xiaorui-retry]", "[data-xiaorui-welcome]"
+]) restartSelectors.set(selector, selector === "[data-xiaorui-welcome]" ? restartWelcomeAudio : new MockElement());
+const restartWidget = new adapter.RichMeRealtimeWidget({ querySelector: (selector) => restartSelectors.get(selector) || null });
+const restartApp = new adapter.RichMeCanonicalApp({
+  endpoint: adapter.PREVIEW_ENDPOINT,
+  commit: "8bf9218a3f09d884d92e1ffc87417c80960ffa3e",
+  welcomeAudio: restartWelcomeAudio,
+  render: (diagnostics, trace) => restartWidget.renderCanonicalState(diagnostics, trace)
+});
+restartWidget.app = restartApp;
+let canonicalStopCalls = 0;
+let canonicalPlaybackClears = 0;
+const originalRestartStop = restartApp.stop.bind(restartApp);
+const originalRestartClear = restartApp.playback.clearForLifecycle.bind(restartApp.playback);
+restartApp.stop = () => { canonicalStopCalls += 1; return originalRestartStop(); };
+restartApp.playback.clearForLifecycle = (...args) => { canonicalPlaybackClears += 1; return originalRestartClear(...args); };
+
+await restartApp.start();
+restartWelcomeAudio.emit("playing");
+restartWelcomeAudio.emit("ended");
+restartApp.handleServerEvent({
+  type: "server.session.created",
+  session: { session_id: "restart-session-1", runtime_streaming_provider: "xiaomi_streaming" },
+  metadata: { session_id: "restart-session-1", runtime_streaming_provider: "xiaomi_streaming" }
+});
+assert.equal(restartWelcomeAudio.playCalls, 1, "first restart-regression session must play one welcome");
+assert.equal(restartApp.sessionReady, true, "first restart-regression session must become authoritative");
+assert.equal(restartApp.inputGate.value, "open", "first restart-regression session must become usable");
+canonicalPlaybackClears = 0;
+
+restartWidget.stopConversation();
+assert.equal(canonicalStopCalls, 1, "adapter stop must delegate to canonical app.stop()");
+assert.equal(canonicalPlaybackClears, 1, "canonical app.stop() must own the single playback lifecycle clear");
+
+await restartApp.start();
+restartWelcomeAudio.emit("playing");
+restartWelcomeAudio.emit("ended");
+restartApp.handleServerEvent({
+  type: "server.session.created",
+  session: { session_id: "restart-session-2", runtime_streaming_provider: "xiaomi_streaming" },
+  metadata: { session_id: "restart-session-2", runtime_streaming_provider: "xiaomi_streaming" }
+});
+assert.equal(restartWelcomeAudio.playCalls, 2, "second start must play exactly one new welcome");
+assert.equal(restartApp.currentSessionId, "restart-session-2", "second authoritative session must replace the first");
+assert.equal(restartApp.sessionReady, true, "second restart-regression session must become authoritative");
+assert.equal(restartApp.inputGate.value, "open", "second restart-regression session must become usable");
+await restartApp.sendVoiceBlob(new Blob(["abc"], { type: "audio/mp4" }), "restart-turn", 1, "audio/mp4", null);
+assert.equal(socketInstances.at(-1).sent.at(-1).type, "client.voice.turn.start", "a new turn must proceed after same-instance restart");
+assert.equal(canonicalPlaybackClears, 2, "canonical lifecycle reset must own playback lifecycle clearing");
 
 const disconnectSelectors = new Map();
 for (const selector of [
@@ -466,7 +530,7 @@ const indexHtml = fs.readFileSync(path.join(repoRoot, "index.html"), "utf8");
 const siteCss = fs.readFileSync(path.join(repoRoot, "assets", "css", "site.css"), "utf8");
 assert.match(siteCss, /\.xiaorui-conversation\s*\{[^}]*overflow:\s*hidden[^}]*flex:\s*1 1 auto/s, "conversation layout must constrain scrolling content instead of clipping controls");
 assert.match(siteCss, /\.xiaorui-controls\s*\{\s*flex:\s*0 0 auto;/, "controls must not shrink out of the panel");
-const widgetAssetVersion = "xiaorui-controls-v1";
+const widgetAssetVersion = "xiaorui-validated-8bf9218";
 for (const assetPath of [
   "assets/css/site.css",
   "assets/js/xiaorui-canonical/audio_format_resolver.js",
