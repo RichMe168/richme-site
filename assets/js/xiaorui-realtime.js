@@ -80,6 +80,8 @@
       this.generationDisplayBaseline = "";
       this.generationDisplayText = "";
       this.lastDisplayText = "";
+      this.lastProcessedGenerationId = "";
+      this.lastProcessedFullDisplayText = "";
       this.lastDisconnectDiagnosticKey = "";
 
       this.initialize();
@@ -331,6 +333,7 @@
       if (!this.transcript) return;
       const generationId = String(diagnostics.active_playback_generation_id || this.app && this.app.generation && this.app.generation.generationId || "");
       const fullDisplayText = String(diagnostics.display_text || "");
+      if (generationId === this.lastProcessedGenerationId && fullDisplayText === this.lastProcessedFullDisplayText) return;
       if (generationId && generationId !== this.activeGenerationId) {
         this.activeGenerationId = generationId;
         this.generationDisplayBaseline = this.lastDisplayText;
@@ -346,6 +349,8 @@
         ? fullDisplayText.slice(this.generationDisplayBaseline.length)
         : fullDisplayText;
       this.lastDisplayText = fullDisplayText;
+      this.lastProcessedGenerationId = generationId;
+      this.lastProcessedFullDisplayText = fullDisplayText;
       const displayText = this.generationDisplayText;
       if (!displayText) return;
       let bubble = this.assistantBubbles.get(generationId);
