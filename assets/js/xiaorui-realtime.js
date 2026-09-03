@@ -75,6 +75,7 @@
       this.authoritativeSessionReady = false;
       this.sessionTraceFloor = 0;
       this.userBubbles = new Map();
+      this.renderedUserAsrEventIds = new Set();
       this.assistantBubbles = new Map();
       this.activeGenerationId = "";
       this.generationDisplayBaseline = "";
@@ -318,7 +319,9 @@
     renderUserTranscript(diagnostics, entries) {
       if (!this.transcript || diagnostics.asr_result !== "final" || !diagnostics.localized_transcript) return;
       const finalEvent = [...entries].reverse().find((entry) => entry.event === "asr_result_received" && entry.success === true);
-      const turnId = String(finalEvent && finalEvent.utterance_id || diagnostics.active_turn_id || `turn-${this.userBubbles.size + 1}`);
+      const turnId = String(finalEvent && finalEvent.utterance_id || "");
+      if (!turnId || this.renderedUserAsrEventIds.has(turnId)) return;
+      this.renderedUserAsrEventIds.add(turnId);
       let bubble = this.userBubbles.get(turnId);
       if (!bubble) {
         bubble = createBubble(this.document, this.transcript, "訪客", "user");
@@ -379,17 +382,18 @@
         this.retryButton.hidden = false;
         return;
       }
-      if (diagnostics.error_type || diagnostics.lifecycle_state === "FAILED") {
+      const activeStreamingSession = diagnostics.websocket_connected === true && this.authoritativeSessionReady;
+      if (microphoneFailureReason) {
+        const [label, hint] = this.microphoneFailureMessage(microphoneFailureReason);
+        this.setUiState("error", label, hint);
+        this.retryButton.hidden = false;
+        return;
+      }
+      if (!activeStreamingSession && (diagnostics.error_type || diagnostics.lifecycle_state === "FAILED")) {
         const message = microphoneFailureReason === "microphone_api_unavailable"
           ? "瀏覽器不支援麥克風 API。"
           : "語音服務連線失敗，請重新連線。";
         this.setUiState("error", "語音服務連線失敗", message);
-        this.retryButton.hidden = false;
-        return;
-      }
-      if (microphoneFailureReason) {
-        const [label, hint] = this.microphoneFailureMessage(microphoneFailureReason);
-        this.setUiState("error", label, hint);
         this.retryButton.hidden = false;
         return;
       }
