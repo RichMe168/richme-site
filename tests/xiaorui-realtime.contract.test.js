@@ -328,6 +328,52 @@ const userBubble = widget.userBubbles.get("utterance-ui");
 assert.equal(userBubble.querySelector("p").textContent, "公司註冊");
 assert.equal(userBubble.dataset.final, "true");
 
+const userBubbleCount = () => [...widget.userBubbles.values()].length;
+widget.renderCanonicalState({
+  asr_result: "final",
+  localized_transcript: "stale diagnostic text",
+  active_turn_id: "utterance-ui",
+  input_gate: "open",
+  listening_active: true,
+  conversation_state: "listening",
+  playback_state: "idle",
+  lifecycle_state: "ACTIVE"
+}, []);
+assert.equal(userBubbleCount(), 1, "stale final diagnostics without a new ASR event must not add a bubble");
+widget.renderCanonicalState({
+  asr_result: "final",
+  localized_transcript: "same sentence",
+  active_turn_id: "utterance-ui",
+  input_gate: "open",
+  listening_active: true,
+  conversation_state: "listening",
+  playback_state: "idle",
+  lifecycle_state: "ACTIVE"
+}, [{ event: "asr_result_received", success: true, utterance_id: "utterance-ui" }]);
+assert.equal(userBubbleCount(), 1, "repeated renders for one utterance_id must remain one bubble");
+widget.renderCanonicalState({
+  asr_result: "final",
+  localized_transcript: "same sentence",
+  active_turn_id: "utterance-ui-2",
+  input_gate: "open",
+  listening_active: true,
+  conversation_state: "listening",
+  playback_state: "idle",
+  lifecycle_state: "ACTIVE"
+}, [{ event: "asr_result_received", success: true, utterance_id: "utterance-ui-2" }]);
+assert.equal(userBubbleCount(), 2, "identical text from a different utterance_id must get its own bubble");
+widget.renderCanonicalState({
+  websocket_connected: true,
+  error_type: "transient_session_error",
+  lifecycle_state: "FAILED",
+  microphone_failure_reason: "",
+  input_gate: "open",
+  listening_active: true,
+  conversation_state: "listening",
+  playback_state: "idle"
+}, [{ event: "session_identity_accepted", success: true, sequence: 1, runtime_streaming_provider: "xiaomi_streaming" }]);
+assert.notEqual(selectors.get("[data-xiaorui-status-wrap]").dataset.state, "error", "active authoritative session must ignore stale generic error diagnostics");
+
 for (const reason of [
   "microphone_permission_denied",
   "getUserMedia_rejected",
