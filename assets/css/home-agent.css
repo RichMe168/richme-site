@@ -1,0 +1,292 @@
+/* Homepage-only XiaoRui Agent enhancements. Loaded dynamically by assets/js/site.js. */
+
+.home-agent-refresh .site-header {
+  background: rgba(7, 17, 31, 0.98);
+}
+
+.home-agent-refresh .nav-shell {
+  width: min(1320px, calc(100% - 2.4rem));
+  min-height: 112px;
+  gap: clamp(0.8rem, 1.8vw, 1.8rem);
+}
+
+.home-agent-refresh .brand {
+  position: relative;
+  z-index: 1;
+  flex: 0 1 auto;
+  gap: 1rem;
+}
+
+.home-agent-refresh .richspace-wordmark {
+  padding: 0.56rem 0.82rem 0.62rem;
+  border: 1px solid rgba(221, 199, 152, 0.7);
+  border-radius: 10px;
+  font-size: clamp(1.7rem, 2.2vw, 2.2rem);
+  box-shadow: 0 7px 24px rgba(0, 0, 0, 0.12);
+}
+
+.home-agent-refresh .brand-sub {
+  color: #f2f4f7;
+  font-size: clamp(1.5rem, 2vw, 2.1rem);
+  font-weight: 600;
+  letter-spacing: 0.035em;
+}
+
+.home-agent-refresh .site-nav {
+  flex: 0 1 auto;
+  gap: 1rem;
+  margin-left: auto;
+}
+
+.home-agent-refresh .site-nav a {
+  font-size: 0.9rem;
+}
+
+.home-agent-promo {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  order: 2;
+  flex: 0 1 360px;
+  min-width: 280px;
+  min-height: 82px;
+  padding: 0.75rem 6rem 0.72rem 1.25rem;
+  overflow: visible;
+  border: 1px solid rgba(221, 199, 152, 0.78);
+  border-radius: 24px;
+  color: #fff;
+  background:
+    radial-gradient(circle at 15% 50%, rgba(221, 199, 152, 0.08), transparent 42%),
+    linear-gradient(135deg, rgba(11, 25, 43, 0.96), rgba(7, 17, 31, 0.98));
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  text-align: left;
+}
+
+.home-agent-promo:hover,
+.home-agent-promo:focus-visible {
+  border-color: var(--gold-light);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.24);
+  outline: none;
+}
+
+.home-agent-promo-copy {
+  display: grid;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.home-agent-promo-copy small {
+  margin-bottom: 0.25rem;
+  color: var(--gold-light);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.home-agent-promo-copy strong {
+  color: #fff;
+  font-size: clamp(1rem, 1.2vw, 1.18rem);
+  font-weight: 700;
+}
+
+.home-agent-promo-copy > span {
+  margin-top: 0.24rem;
+  overflow: hidden;
+  color: #cbd3dd;
+  font-size: 0.74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-agent-promo > img {
+  position: absolute;
+  right: 0.65rem;
+  bottom: -1px;
+  width: 82px;
+  height: 101px;
+  object-fit: contain;
+  object-position: center bottom;
+  filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.28));
+  pointer-events: none;
+}
+
+.home-agent-refresh .menu-toggle {
+  order: 4;
+}
+
+.home-agent-refresh .hero-inner {
+  min-height: clamp(500px, 55vw, 680px);
+  padding: clamp(4.5rem, 8vw, 7.5rem) min(38vw, 460px) clamp(4.5rem, 8vw, 7.5rem) 0;
+}
+
+.home-agent-refresh .hero h1 {
+  max-width: 700px;
+}
+
+.home-agent-refresh .hero-copy {
+  max-width: 620px;
+}
+
+.home-agent-video {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  right: 0;
+  width: min(34vw, 420px);
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid rgba(221, 199, 152, 0.7);
+  border-radius: 18px;
+  background: #050a10;
+  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.34);
+  transform: translateY(-50%);
+}
+
+.home-agent-video video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #050a10;
+}
+
+.home-agent-video figcaption {
+  padding: 0.65rem 0.85rem 0.72rem;
+  color: #e9edf2;
+  background: rgba(7, 17, 31, 0.96);
+  font-size: 0.82rem;
+  letter-spacing: 0.025em;
+  text-align: right;
+}
+
+.home-agent-refresh .xiaorui-launcher {
+  transition: opacity 0.22s ease, transform 0.22s ease, visibility 0.22s ease;
+}
+
+.home-agent-refresh.home-hero-visible .xiaorui-launcher {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(12px);
+}
+
+@media (max-width: 1180px) {
+  .home-agent-refresh .nav-shell {
+    width: min(1240px, calc(100% - 2rem));
+    min-height: 102px;
+    flex-wrap: wrap;
+    padding: 0.85rem 0;
+  }
+
+  .home-agent-refresh .site-nav {
+    order: 4;
+    flex: 1 0 100%;
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+
+  .home-agent-promo {
+    margin-left: auto;
+  }
+
+  .home-agent-promo-copy > span {
+    display: none;
+  }
+
+  .home-agent-refresh .brand-sub {
+    font-size: clamp(1.35rem, 2.4vw, 1.9rem);
+  }
+
+  .home-agent-refresh .hero-inner {
+    padding-right: min(40vw, 400px);
+  }
+
+  .home-agent-video {
+    width: min(36vw, 385px);
+  }
+}
+
+@media (max-width: 900px) {
+  .home-agent-refresh .nav-shell {
+    min-height: auto;
+  }
+
+  .home-agent-refresh .brand {
+    order: 1;
+  }
+
+  .home-agent-refresh .menu-toggle {
+    order: 2;
+  }
+
+  .home-agent-promo {
+    order: 3;
+    flex: 1 0 100%;
+    width: 100%;
+    min-width: 0;
+    min-height: 68px;
+    margin-top: 0.7rem;
+    padding-right: 5.4rem;
+    border-radius: 18px;
+  }
+
+  .home-agent-promo > img {
+    width: 68px;
+    height: 84px;
+  }
+
+  .home-agent-refresh .site-nav {
+    order: 4;
+  }
+
+  .home-agent-refresh .hero-inner {
+    display: block;
+    min-height: 0;
+    padding: 4.5rem 0;
+  }
+
+  .home-agent-video {
+    position: relative;
+    top: auto;
+    right: auto;
+    width: min(100%, 560px);
+    margin: 2.5rem 0 0 auto;
+    transform: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .home-agent-refresh .nav-shell {
+    width: min(100% - 1.2rem, 1480px);
+  }
+
+  .home-agent-refresh .richspace-wordmark {
+    font-size: 1.35rem;
+  }
+
+  .home-agent-refresh .brand-sub {
+    font-size: 1.18rem;
+  }
+
+  .home-agent-promo-copy strong {
+    font-size: 0.98rem;
+  }
+
+  .home-agent-refresh .hero-inner {
+    padding: 3.5rem 0;
+  }
+
+  .home-agent-video {
+    margin-top: 2rem;
+    border-radius: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-agent-refresh .xiaorui-launcher,
+  .home-agent-promo {
+    transition: none;
+  }
+}
