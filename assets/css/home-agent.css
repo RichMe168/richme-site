@@ -132,7 +132,7 @@
 .home-agent-video {
   position: absolute;
   z-index: 3;
-  top: 50%;
+  top: 40%;
   right: 0;
   width: min(34vw, 420px);
   margin: 0;
@@ -204,6 +204,7 @@
   }
 
   .home-agent-video {
+    top: 50%;
     width: min(36vw, 385px);
   }
 }
