@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>找不到頁面｜睿勤 Richme</title>
+  <meta name="robots" content="noindex">
+  <style>
+    :root {
+      color-scheme: light;
+      --navy: #07111f;
+      --ink: #17202c;
+      --muted: #647080;
+      --warm: #f5f2eb;
+      --paper: #fffdf9;
+      --gold: #b99a62;
+      --line: rgba(20, 40, 65, .14);
+    }
+    * { box-sizing: border-box; }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      min-height: 100dvh;
+      margin: 0;
+      padding: 24px 16px;
+      color: var(--ink);
+      background: var(--warm);
+      font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, -apple-system, sans-serif;
+      line-height: 1.75;
+    }
+    main {
+      width: 100%;
+      max-width: 560px;
+      padding: 40px 24px;
+      text-align: center;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: 0 24px 70px rgba(8, 20, 36, .12);
+    }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--gold);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .18em;
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(22px, 6vw, 30px);
+      line-height: 1.35;
+    }
+    p {
+      margin: 0 0 28px;
+      color: var(--muted);
+    }
+    nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: center;
+    }
+    a {
+      display: inline-block;
+      min-height: 48px;
+      padding: 11px 24px;
+      border: 1px solid var(--navy);
+      border-radius: 999px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    a.primary {
+      color: #fff;
+      background: var(--navy);
+    }
+    a.secondary {
+      color: var(--navy);
+      background: transparent;
+    }
+    a:focus-visible {
+      outline: 3px solid var(--gold);
+      outline-offset: 3px;
+    }
+    @media (max-width: 420px) {
+      a { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">ERROR 404</p>
+    <h1>這個頁面不存在或已移動</h1>
+    <p>你可以回到首頁，或聯絡我們。</p>
+    <nav aria-label="重新導覽">
+      <a class="primary" href="/">回到首頁</a>
+      <a class="secondary" href="/contact">聯絡睿勤</a>
+    </nav>
+  </main>
+</body>
+</html>
